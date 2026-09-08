@@ -1,0 +1,33 @@
+# Python 虚拟环境与运行缓存
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# 本地环境配置；保留配置示例
+.env
+.env.*
+!.env.example
+
+# 日志与进程记录
+log/
+logs/
+*.log
+*.pid
+
+# 本地运行数据库及其附属文件
+/data/*.db*
+/data/*.sqlite*
+
+# 各章节生成的报告
+/data/*/reports/
+
+# 第 10 章生成产物；保留决定提交的内部数据集
+/data/ch10/*
+!/data/ch10/dataset/
+
+# macOS 自动生成文件
+.DS_Store
+
+# 本地配置备份，不参与迁移
+/docker-compose.yml.bak
