@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><title>MewHelp</title>
+<h1>MewHelp</h1><div id="messages"></div>
+<form id="chat"><input id="message" required><button>发送</button></form>
+<script>
+const sessionId=crypto.randomUUID();
+const log=document.getElementById('messages');
+document.getElementById('chat').addEventListener('submit',async(event)=>{
+  event.preventDefault();const input=document.getElementById('message');
+  const user=document.createElement('p');user.textContent=input.value;log.append(user);
+  const reply=document.createElement('p');log.append(reply);
+  const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({session_id:sessionId,message:input.value})});input.value='';
+  if(!response.ok){reply.textContent='请求失败';return;}
+  const reader=response.body.getReader();const decoder=new TextDecoder();let pending='';
+  while(true){
+    const {value,done}=await reader.read();pending+=decoder.decode(value,{stream:!done});let boundary;
+    while((boundary=pending.indexOf('\n\n'))!==-1){
+      const frame=pending.slice(0,boundary);pending=pending.slice(boundary+2);
+      for(const line of frame.split('\n')){
+        if(!line.startsWith('data: ')||line==='data: [DONE]')continue;
+        const payload=JSON.parse(line.slice(6));
+        if(payload.delta)reply.textContent+=payload.delta;
+        if(payload.message)reply.textContent=payload.message;
+      }
+    }if(done)break;
+  }
+});
+</script></html>
