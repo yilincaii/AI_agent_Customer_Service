@@ -4,3 +4,5 @@ dev:
 	uv run uvicorn app.main:app --port 8000
 test:
 	uv run pytest
+eval:
+	uv run python scripts/eval_extract.py

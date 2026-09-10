@@ -1,3 +1,5 @@
+import logging
+from langchain_core.exceptions import OutputParserException
 # 来源：公众号@小林coding
 # 后端八股网站：xiaolincoding.com
 # Agent网站：xiaolinnote.com
@@ -66,3 +68,78 @@ def resolve_slot(slot="chat"):
     if slot != "chat":
         raise ValueError("Only the chat model slot exists in this snapshot")
     return settings.chat_model,settings.chat_base_url,settings.chat_api_key
+
+logger=logging.getLogger(__name__)
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+_NO_STREAM_TOOLCALL_FAMILIES: tuple[str, ...] = ("minimax",)
+
+def needs_non_streaming_tools(model: str | None = None, slot: str = "chat") -> bool:
+    name = (model or resolve_slot(slot)[0] or "").lower()
+    return any(f in name for f in _NO_STREAM_TOOLCALL_FAMILIES)
+
+def structured(schema, *, model: str | None = None, streaming: bool = True,
+               temperature: float | None = None, slot: str = "chat"):
+    """要结构化结果就用这个,别直接 with_structured_output——它默认走 json_schema,
+    那条路解析正文,会被模型多吐的思考正文带崩。
+
+    默认开流式:中转的非流式 OpenAI 兼容层会把 tool_calls 的 arguments 拼坏,流式不会
+    (见上面那段注释里的实测)。
+
+    只有 function calling 一条通路。偶发失败原样重试一次,再不成就把异常抛给调用点——
+    调用点各自降级成安全默认值,别在这里降级到一条更差的通路上。
+
+    temperature 透传给底层模型:当评委用的结构化链路传 0(见 get_chat_model 的说明)。
+    """
+    from langchain_core.runnables import RunnableLambda
+
+    slot_model, slot_base, _ = resolve_slot(slot)
+    name = (model or slot_model or "").lower()
+    if needs_non_streaming_tools(model, slot=slot):
+        streaming = False        # 这类模型流式不吐 tool_calls,见 _NO_STREAM_TOOLCALL_FAMILIES
+    m = get_chat_model(streaming=streaming, model=model, temperature=temperature,
+                       slot=slot, thinking=False)
+    fc = m.with_structured_output(schema, method="function_calling")
+
+    def _log(attempt: int, why: str) -> None:
+        # 带上通道:同一个模型换个上游行为就不一样,只打模型名排障时定位不到
+        logger.warning("%s 经 %s 的 function calling 第 %s 次没成(%s),%s",
+                       name, slot_base, attempt, why,
+                       "原样重试一次" if attempt == 1 else "抛给调用点")
+
+    def _no_tool_calls() -> OutputParserException:
+        return OutputParserException(
+            f"{name} 经 {settings.chat_base_url} 连着两次都没返回 tool_calls")
+
+    def _run(x):
+        for attempt in (1, 2):     # 偶发不返回 tool_calls,原样重试一次
+            try:
+                r = fc.invoke(x)
+            except Exception as e:
+                _log(attempt, type(e).__name__)
+                if attempt == 2:
+                    raise
+                continue
+            if r is not None:
+                return r
+            _log(attempt, "响应里没有 tool_calls")
+        raise _no_tool_calls()
+
+    async def _arun(x):
+        for attempt in (1, 2):
+            try:
+                r = await fc.ainvoke(x)
+            except Exception as e:
+                _log(attempt, type(e).__name__)
+                if attempt == 2:
+                    raise
+                continue
+            if r is not None:
+                return r
+            _log(attempt, "响应里没有 tool_calls")
+        raise _no_tool_calls()
+
+    return RunnableLambda(_run, afunc=_arun)
