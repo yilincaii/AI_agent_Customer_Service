@@ -16,5 +16,7 @@ class Settings(BaseSettings):
     token_budget: int = 2000
     max_output_tokens: int = 10000
 
+    database_url: str = ""  # 必须通过 DATABASE_URL 提供，不内置数据库凭据
+    test_database_url: str = ""  # 必须通过 TEST_DATABASE_URL 提供
 
 settings = Settings()

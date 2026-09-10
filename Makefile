@@ -6,3 +6,5 @@ test:
 	uv run pytest
 eval:
 	uv run python scripts/eval_extract.py
+db-up:
+	docker compose up -d mysql
