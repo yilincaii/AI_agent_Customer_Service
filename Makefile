@@ -8,3 +8,5 @@ eval:
 	PYTHONPATH=. uv run python scripts/eval_extract.py
 db-up:
 	docker compose up -d mysql
+eval-agent:
+	PYTHONPATH=. uv run python scripts/eval_agent.py

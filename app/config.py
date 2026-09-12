@@ -18,5 +18,6 @@ class Settings(BaseSettings):
 
     database_url: str = ""  # 必须通过 DATABASE_URL 提供，不内置数据库凭据
     test_database_url: str = ""  # 必须通过 TEST_DATABASE_URL 提供
+    max_agent_steps: int = 6              # ReAct 环最大步数(封顶,超则兜底)
 
 settings = Settings()

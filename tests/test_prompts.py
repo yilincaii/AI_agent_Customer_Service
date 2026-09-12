@@ -5,7 +5,7 @@
 
 from langchain_core.messages import HumanMessage
 
-from app.core.prompts import CUSTOMER_SERVICE_PROMPT, EXTRACT_PROMPT
+from app.core.prompts import CUSTOMER_SERVICE_PROMPT, EXTRACT_PROMPT, AGENT_PROMPT
 
 def test_customer_service_prompt_renders_with_history():
     msgs = CUSTOMER_SERVICE_PROMPT.format_messages(
@@ -21,3 +21,7 @@ def test_extract_prompt_renders_text():
     msgs = EXTRACT_PROMPT.format_messages(text="订单 MH1 坏了要退款")
     assert msgs[0].type == "system"
     assert "订单 MH1 坏了要退款" in msgs[-1].content
+
+def test_agent_prompt_accepts_dialog():
+    rendered=AGENT_PROMPT.invoke({"history":[]}).to_messages()
+    assert rendered and rendered[0].content

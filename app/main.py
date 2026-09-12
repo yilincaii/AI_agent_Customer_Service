@@ -19,3 +19,6 @@ app.mount("/static",StaticFiles(directory=_STATIC_DIR),name="static")
 @app.get("/",include_in_schema=False)
 async def chat_page() -> FileResponse:
     return FileResponse(_STATIC_DIR/"index.html")
+
+from app.api.agent import router as agent_router
+app.include_router(agent_router)
