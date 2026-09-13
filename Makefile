@@ -10,3 +10,5 @@ db-up:
 	docker compose up -d mysql
 eval-agent:
 	PYTHONPATH=. uv run python scripts/eval_agent.py
+kb-preview:
+	PYTHONPATH=. uv run python scripts/show_kb.py
