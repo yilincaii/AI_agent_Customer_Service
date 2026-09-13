@@ -19,5 +19,9 @@ class Settings(BaseSettings):
     database_url: str = ""  # 必须通过 DATABASE_URL 提供，不内置数据库凭据
     test_database_url: str = ""  # 必须通过 TEST_DATABASE_URL 提供
     max_agent_steps: int = 6              # ReAct 环最大步数(封顶,超则兜底)
+    embed_base_url: str = "https://api.siliconflow.cn/v1"
+    embed_api_key: str
+    embed_model: str = "BAAI/bge-m3"          # 上游真实名(无网关别名可用)
+    milvus_uri: str = "http://localhost:19530"   # ch04: Lite → Standalone
 
 settings = Settings()

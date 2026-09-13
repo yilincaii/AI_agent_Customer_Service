@@ -12,3 +12,9 @@ eval-agent:
 	PYTHONPATH=. uv run python scripts/eval_agent.py
 kb-preview:
 	PYTHONPATH=. uv run python scripts/show_kb.py
+kb-build:
+	PYTHONPATH=. uv run python scripts/build_kb.py
+kb-vectorize:
+	PYTHONPATH=. uv run python scripts/vectorize_kb.py
+kb-repatch:
+	PYTHONPATH=. uv run python scripts/kb_repatch.py
