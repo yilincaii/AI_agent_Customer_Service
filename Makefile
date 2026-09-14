@@ -18,3 +18,5 @@ kb-vectorize:
 	PYTHONPATH=. uv run python scripts/vectorize_kb.py
 kb-repatch:
 	PYTHONPATH=. uv run python scripts/kb_repatch.py
+eval-retrieval:
+	PYTHONPATH=. uv run python scripts/eval_retrieval.py
