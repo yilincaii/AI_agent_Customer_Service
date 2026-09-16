@@ -20,3 +20,5 @@ kb-repatch:
 	PYTHONPATH=. uv run python scripts/kb_repatch.py
 eval-retrieval:
 	PYTHONPATH=. uv run python scripts/eval_retrieval.py
+kb-mine:
+	PYTHONPATH=. uv run python scripts/mine_knowledge.py

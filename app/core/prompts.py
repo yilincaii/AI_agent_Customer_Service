@@ -88,3 +88,19 @@ RAG_ANSWER_SYSTEM = """你是「喵喵优选」电商平台的智能客服「小
 RAG_ANSWER_PROMPT = ChatPromptTemplate.from_messages(
     [("system", RAG_ANSWER_SYSTEM), ("human", "用户问题:{query}\n\n知识证据:\n{evidence}")]
 )
+
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+MINING_SYSTEM = """你是客服知识库构建助手。下面是若干条历史客服对话(用户问 + 客服答)。
+请从中抽取「可复用的问答对」,用于沉淀到 FAQ 知识库。要求:
+- 只抽有普适价值的问答(政策、流程、时效、费用等),忽略闲聊、纯个案(如某具体订单号的状态查询)。
+- question 用简洁的通用问法(去掉具体订单号/人名),answer 忠于客服原答、不编造承诺。
+- 一条对话可能不含任何可复用问答,此时不要硬抽。
+- 退款/售后时效统一表述为「以平台售后规则为准」。"""
+
+MINING_PROMPT = ChatPromptTemplate.from_messages(
+    [("system", MINING_SYSTEM), ("human", "历史对话:\n{conversations}")]
+)

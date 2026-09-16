@@ -194,3 +194,90 @@ async def list_chunk_pairs() -> list[tuple[str, str]]:
     async with db.async_session() as s:
         result = await s.execute(select(KnowledgeChunk.questions, KnowledgeChunk.answer))
         return [(q, a) for q, a in result.all()]
+
+async def staging_stats() -> dict:
+    """抽 QA 暂存表盘点:三个状态各几条 + 批次数 + 最近批次号。
+    「先进暂存、整体去重再入库」这一步在页面上要看得见,靠的就是这三个状态的落差。"""
+    async with db.async_session() as s:
+        counts = {k: int(v) for k, v in (await s.execute(
+            select(QaExtractionStaging.status, func.count())
+            .group_by(QaExtractionStaging.status))).all()}
+        batches = (await s.execute(
+            select(func.count(func.distinct(QaExtractionStaging.batch_no))))).scalar_one()
+        latest = (await s.execute(
+            select(QaExtractionStaging.batch_no)
+            .order_by(QaExtractionStaging.id.desc()).limit(1))).scalar_one_or_none()
+    return {"counts": {k: counts.get(k, 0)
+                       for k in ("extracted", "kept", "discarded")},
+            "total": sum(counts.values()), "batches": int(batches), "latest_batch": latest}
+
+async def insert_staging(batch_no: str, source_ref: str | None, question: str, answer: str) -> int:
+    async with db.async_session() as s:
+        row = QaExtractionStaging(
+            batch_no=batch_no, source_ref=source_ref, question=question, answer=answer
+        )
+        s.add(row)
+        await s.commit()
+        return row.id
+
+async def list_staging_by_status(status: str) -> list[QaExtractionStaging]:
+    async with db.async_session() as s:
+        result = await s.execute(
+            select(QaExtractionStaging)
+            .where(QaExtractionStaging.status == status)
+            .order_by(QaExtractionStaging.id)
+        )
+        return list(result.scalars())
+
+async def list_staging_by_ids(ids: list[int], status: str | None = None) -> list[QaExtractionStaging]:
+    """按 id 取暂存行,可再限定状态。人工采纳/弃用时用它——限定 status='kept' 就能挡住
+    重复采纳(点两次只有第一次拿得到行)和拿已弃用的行来入库。"""
+    if not ids:
+        return []
+    async with db.async_session() as s:
+        q = select(QaExtractionStaging).where(QaExtractionStaging.id.in_(ids))
+        if status is not None:
+            q = q.where(QaExtractionStaging.status == status)
+        return list((await s.execute(q.order_by(QaExtractionStaging.id))).scalars())
+
+async def set_staging_status(ids: list[int], status: str) -> None:
+    if not ids:
+        return
+    async with db.async_session() as s:
+        for i in ids:
+            row = await s.get(QaExtractionStaging, i)
+            if row is not None:
+                row.status = status
+        await s.commit()
+
+async def list_conversations_with_messages() -> list[tuple[int, list[Message]]]:
+    """挖知识用:每个会话及其按序消息(供拼成对话文本喂 LLM)。"""
+    async with db.async_session() as s:
+        conv_ids = list(
+            (await s.execute(select(Conversation.id).order_by(Conversation.id))).scalars()
+        )
+        out: list[tuple[int, list[Message]]] = []
+        for cid in conv_ids:
+            msgs = list(
+                (await s.execute(
+                    select(Message).where(Message.conversation_id == cid).order_by(Message.id)
+                )).scalars()
+            )
+            out.append((cid, msgs))
+        return out
+
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+async def delete_knowledge_chunks(ids: list[int]) -> None:
+    """审核写回失败的回滚:删掉本次插入的 pending chunk,防重试造出重复知识条目。"""
+    if not ids:
+        return
+    async with db.async_session() as s:
+        for i in ids:
+            row = await s.get(KnowledgeChunk, i)
+            if row is not None:
+                await s.delete(row)
+        await s.commit()

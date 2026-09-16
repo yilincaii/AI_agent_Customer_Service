@@ -22,3 +22,13 @@ async def chat_page() -> FileResponse:
 
 from app.api.agent import router as agent_router
 app.include_router(agent_router)
+
+from app.api.kb import router as kb_router
+app.include_router(kb_router)
+
+@app.get("/kb")
+def kb_page():
+    return FileResponse(Path(__file__).parent / "static" / "kb.html")
+
+from app.api.jobs import router as jobs_router
+app.include_router(jobs_router)

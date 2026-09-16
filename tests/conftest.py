@@ -29,7 +29,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
 
-_DDL_FILES = [pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch02-ddl.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch03-ddl.sql"]
+_DDL_FILES = [pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch02-ddl.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch03-ddl.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch03-staging-review.sql"]
 
 _TABLES = ["messages", "tickets", "conversations", "faq", "qa_extraction_staging", "knowledge_chunks"]
 

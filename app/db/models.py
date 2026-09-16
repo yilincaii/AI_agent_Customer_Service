@@ -94,7 +94,7 @@ class QaExtractionStaging(Base):
     answer: Mapped[str] = mapped_column(Text)
     status: Mapped[str] = mapped_column(
         # kept 是「去重保留、等人审」,不是「已入库」;入库只走 /api/kb/staging/approve
-        Enum("extracted", "kept", "discarded"),
+        Enum("extracted", "kept", "discarded", "approved", "rejected"),
         server_default="extracted",
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
