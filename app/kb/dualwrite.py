@@ -42,7 +42,7 @@ async def vectorize_pending(client=None, batch_size: int = 64, collection: str =
         texts = [f"{r.category}\n{r.questions}\n{r.answer}" for r in batch]
         vectors = await embeddings.embed_texts(texts)
         rows = [
-            {"id": r.id, "dense": v,
+            {"id": r.id, "dense": v, "text": t,
              "question": r.questions, "answer": r.answer,
              "section_path": r.section_path or "", "content_type": r.content_type or "",
              "category": r.category or ""}
