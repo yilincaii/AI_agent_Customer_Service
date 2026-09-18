@@ -98,3 +98,42 @@ class QaExtractionStaging(Base):
         server_default="extracted",
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+class LowConfidenceQuestion(Base):
+    __tablename__ = "low_confidence_questions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("conversations.id"), nullable=True)
+    raw_question: Mapped[str] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(Enum("retrieval_low_conf", "self_check", "user_feedback"))
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # ch09 落池时召回快照。none_as_null=True:Python None 存 SQL NULL 而非 JSON null
+    # (默认 False 会把 None 写成 JSON 'null',IS NOT NULL 判真、语义全乱,实测踩坑)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
+class FaithCase(Base):
+    """ch04 编造个案台账:一题一行,跨轮累计。
+
+    报告每跑一次就被覆盖,个案和它的处置状态得有地方长期待着。同一题再次被判编造只更新
+    这一行(seen_count+1);已解决的题重新被判出来会退回「未解决」——那是复发。
+    citations 是这一轮喂给模型的 Top-K 证据全集(答案里的角标 [n] 即其序号),追溯时要能
+    看到当时喂了什么、以及答案实际只引用了其中哪几条。
+    """
+    __tablename__ = "faith_cases"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    eval_id: Mapped[str] = mapped_column(String(16), unique=True)
+    bucket: Mapped[str] = mapped_column(String(24))
+    query: Mapped[str] = mapped_column(String(512))
+    strategy: Mapped[str] = mapped_column(String(24), server_default="hybrid_rerank")
+    answer: Mapped[str] = mapped_column(Text)
+    reason: Mapped[str] = mapped_column(Text)
+    citations: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    judge_model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    status: Mapped[str] = mapped_column(
+        Enum("未解决", "已解决", "无需解决"), server_default="未解决")
+    seen_count: Mapped[int] = mapped_column(Integer, server_default="1")
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    resolution: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)

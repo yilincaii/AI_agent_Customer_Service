@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy import case, func, select, update
 import app.db.base as db
 from app.config import settings
-from app.db.models import Conversation, Message, Faq, Ticket, KnowledgeChunk, QaExtractionStaging
+from app.db.models import Conversation, Message, Faq, Ticket, KnowledgeChunk, QaExtractionStaging, LowConfidenceQuestion, FaithCase
 
 # 来源：公众号@小林coding
 # 后端八股网站：xiaolincoding.com
@@ -250,6 +250,19 @@ async def set_staging_status(ids: list[int], status: str) -> None:
                 row.status = status
         await s.commit()
 
+async def insert_low_confidence(
+    conversation_id: int | None, raw_question: str, source: str, reason: str | None,
+    retrieved_chunks: list | None = None,
+) -> int:
+    async with db.async_session() as s:
+        row = LowConfidenceQuestion(
+            conversation_id=conversation_id, raw_question=raw_question,
+        )
+        s.add(row)
+        await s.commit()
+        await s.refresh(row)
+        return row.id
+
 async def list_conversations_with_messages() -> list[tuple[int, list[Message]]]:
     """挖知识用:每个会话及其按序消息(供拼成对话文本喂 LLM)。"""
     async with db.async_session() as s:
@@ -265,6 +278,86 @@ async def list_conversations_with_messages() -> list[tuple[int, list[Message]]]:
             )
             out.append((cid, msgs))
         return out
+
+async def upsert_faith_case(eval_id: str, bucket: str, query: str, answer: str, reason: str,
+                            citations: list | None = None, strategy: str = "hybrid_rerank",
+                            judge_model: str | None = None) -> tuple[int, bool]:
+    """一题一行:已有就更新成最近一次并 seen_count+1,返回 (id, 是否复发)。
+
+    复发 = 这条之前被标过「已解决 / 无需解决」,现在又被判编造。那不是新问题,而是上次
+    没改对(或者改动被回退),所以状态退回「未解决」重新进待处理列表——resolved_at 留着,
+    列表上据此打「复发」标。
+    """
+    async with db.async_session() as s:
+        row = (await s.execute(
+            select(FaithCase).where(FaithCase.eval_id == eval_id))).scalar_one_or_none()
+        now = datetime.now()
+        if row is None:
+            row = FaithCase(eval_id=eval_id, bucket=bucket, query=query, answer=answer,
+                            reason=reason, citations=citations, strategy=strategy,
+                            judge_model=judge_model, status="未解决", seen_count=1,
+                            first_seen_at=now, last_seen_at=now)
+            s.add(row)
+            await s.commit()
+            return row.id, False
+        reopened = row.status != "未解决"
+        row.bucket, row.query, row.answer, row.reason = bucket, query, answer, reason
+        row.strategy, row.judge_model = strategy, judge_model
+        if citations is not None:
+            row.citations = citations
+        row.seen_count = (row.seen_count or 0) + 1
+        row.last_seen_at = now
+        row.status = "未解决"
+        await s.commit()
+        return row.id, reopened
+
+async def list_faith_cases(status: str | None = None, page: int = 1,
+                           size: int = 5) -> tuple[list[FaithCase], int, dict]:
+    """分页列表 + 三个状态各自的条数。未解决排前面,同状态内最近判出的排前面。"""
+    async with db.async_session() as s:
+        counts = {k: 0 for k in ("未解决", "已解决", "无需解决")}
+        for st, n in (await s.execute(
+                select(FaithCase.status, func.count()).group_by(FaithCase.status))).all():
+            counts[st] = int(n)
+        q = select(FaithCase)
+        if status:
+            q = q.where(FaithCase.status == status)
+        total = int((await s.execute(
+            select(func.count()).select_from(q.subquery()))).scalar_one())
+        rows = (await s.execute(
+            q.order_by(case((FaithCase.status == "未解决", 0), else_=1),
+                       FaithCase.last_seen_at.desc(), FaithCase.id.desc())
+            .limit(size).offset(max(0, (page - 1) * size)))).scalars()
+        return list(rows), total, counts
+
+async def faith_case_status_map() -> dict[str, str]:
+    """eval_id → 处置状态。给幻觉率算「本轮」用:报告只给这一轮判出了哪几题,
+    每题现在是什么处置得回台账查——台账是跨轮累计的,不能直接拿它的总数当本轮判出。"""
+    async with db.async_session() as s:
+        rows = (await s.execute(select(FaithCase.eval_id, FaithCase.status))).all()
+        return {eid: st for eid, st in rows}
+
+async def set_faith_case_status(case_id: int, status: str,
+                                resolution: str | None = None) -> FaithCase | None:
+    """人工处置:已解决 / 无需解决 / 退回未解决。
+
+    处置要留交代:标「已解决」得写清怎么解决的,标「无需解决」得写清为什么不用改——
+    半年后回头看,一个没写理由的「无需解决」和没处理过没区别。校验在 API 层(能回 400),
+    这里只负责落库:退回未解决时连 resolved_at 和说明一起清掉。
+    """
+    async with db.async_session() as s:
+        row = await s.get(FaithCase, case_id)
+        if row is None:
+            return None
+        row.status = status
+        if status == "未解决":
+            row.resolved_at, row.resolution = None, None
+        else:
+            row.resolved_at = datetime.now()
+            row.resolution = resolution
+        await s.commit()
+        await s.refresh(row)
+        return row
 
 # 来源：公众号@小林coding
 # 后端八股网站：xiaolincoding.com
