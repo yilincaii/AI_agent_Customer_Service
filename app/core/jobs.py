@@ -28,7 +28,7 @@ class JobSpec:
     argv: tuple[str, ...]
     needs: str
     heavy: bool = False
-JOBS: dict[str, JobSpec] = {j.name: j for j in (JobSpec('kb-preview', '材料清单与切块预览', ('make', 'kb-preview'), '本地跑,不写库'), JobSpec('kb-build', '离线建库(文档切块 → pending)', ('make', 'kb-build'), '需 mysql'), JobSpec('kb-mine', '对话挖知识(抽 QA → 去重 → pending)', ('make', 'kb-mine'), '需 mysql + 聊天上游', heavy=True), JobSpec('kb-vectorize', '向量化(嵌入 → Milvus → 回标 done)', ('make', 'kb-vectorize'), '需 mysql + 嵌入上游 + Milvus'), JobSpec('kb-repatch', '补丁式重嵌(md 改动 → 原地改正文)', ('make', 'kb-repatch'), '需 mysql;改完再按「向量化待补块」'))}
+JOBS: dict[str, JobSpec] = {j.name: j for j in (JobSpec('kb-preview', '材料清单与切块预览', ('make', 'kb-preview'), '本地跑,不写库'), JobSpec('kb-build', '离线建库(文档切块 → pending)', ('make', 'kb-build'), '需 mysql'), JobSpec('kb-mine', '对话挖知识(抽 QA → 去重 → pending)', ('make', 'kb-mine'), '需 mysql + 聊天上游', heavy=True), JobSpec('kb-vectorize', '向量化(嵌入 → Milvus → 回标 done)', ('make', 'kb-vectorize'), '需 mysql + 嵌入上游 + Milvus'), JobSpec('kb-repatch', '补丁式重嵌(md 改动 → 原地改正文)', ('make', 'kb-repatch'), '需 mysql;改完再按「向量化待补块」'), JobSpec('eval-rag', 'RAG 评估(四策略对照)', ('make', 'eval-rag'), '需 Milvus + 已建库 + 聊天上游,分钟级', heavy=True))}
 
 @dataclass
 class JobRun:

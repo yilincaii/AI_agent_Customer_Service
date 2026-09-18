@@ -22,3 +22,9 @@ eval-retrieval:
 	PYTHONPATH=. uv run python scripts/eval_retrieval.py
 kb-mine:
 	PYTHONPATH=. uv run python scripts/mine_knowledge.py
+eval-rag:
+	PYTHONPATH=. uv run python scripts/eval_ch04.py
+eval-check:
+	PYTHONPATH=. uv run python scripts/validate_eval_ch04.py
+judge-check:
+	PYTHONPATH=. uv run python scripts/judge_check.py

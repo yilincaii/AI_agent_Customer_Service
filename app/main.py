@@ -32,3 +32,10 @@ def kb_page():
 
 from app.api.jobs import router as jobs_router
 app.include_router(jobs_router)
+
+from app.api.rageval import router as rageval_router
+app.include_router(rageval_router)
+
+@app.get("/rag-eval")
+def rageval_page():
+    return FileResponse(Path(__file__).parent / "static" / "rageval.html")
