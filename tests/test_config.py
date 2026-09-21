@@ -15,7 +15,9 @@ def test_token_budget_can_be_configured(monkeypatch):
     assert Settings(_env_file=None).token_budget == 500
 
 
-def test_application_loads_without_future_services():
+def test_application_loads_without_future_services(monkeypatch):
+    from app.config import settings
+    monkeypatch.setattr(settings,"checkpointer_db_path",":memory:")
     from app.main import app
     from fastapi.testclient import TestClient
     with TestClient(app) as client:

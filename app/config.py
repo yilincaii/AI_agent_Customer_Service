@@ -30,5 +30,6 @@ class Settings(BaseSettings):
     rerank_top_k: int = 10        # 精排出 Top-10
     subquery_split: bool = True   # 一问多意图时按子句拆开各检索一遍再轮转合并(见 retrieval)
     rerank_min_score: float = 0.3 # 重排最高分低于此 → 检索证据低,拒答
+    checkpointer_db_path: str = "data/ch05_checkpoints.sqlite"  # LangGraph checkpointer(data/*.db* 已 gitignore)
 
 settings = Settings()

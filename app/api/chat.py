@@ -3,42 +3,51 @@
 # Agent网站：xiaolinnote.com
 # 简历模版：jianli.xiaolinnote.com
 import json
+import logging
 from collections.abc import AsyncIterator
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
-from langchain_core.messages import AIMessage, HumanMessage
-from app.config import settings
-from app.core.llm import get_chat_model
-from app.core.memory import SessionStore, trim_history
-from app.core.prompts import CUSTOMER_SERVICE_PROMPT
+from sqlalchemy.exc import SQLAlchemyError
+from app.graph import runtime
 from app.schemas.chat import ChatRequest
-
-router=APIRouter()
-store=SessionStore()
-
+logger = logging.getLogger(__name__)
+router = APIRouter()
 
 def _sse(payload: dict) -> str:
-    return f"data: {json.dumps(payload,ensure_ascii=False)}\n\n"
+    return f'data: {json.dumps(payload, ensure_ascii=False)}\n\n'
 
+def _sse_error(message: str) -> AsyncIterator[str]:
+    yield 'event: error\n'
+    yield _sse({'message': message})
 
-@router.post("/api/chat")
+@router.post('/api/chat')
 async def chat(req: ChatRequest):
+
     async def event_stream() -> AsyncIterator[str]:
-        user=HumanMessage(req.message)
-        history=trim_history([*store.get(req.session_id),user],settings.token_budget)
-        messages=CUSTOMER_SERVICE_PROMPT.format_messages(history=history)
-        answer=[]
         try:
-            model=get_chat_model(streaming=True)
-            async for chunk in model.astream(messages):
-                if isinstance(chunk.content,str) and chunk.content:
-                    answer.append(chunk.content)
-                    yield _sse({"delta":chunk.content})
-        except Exception:
-            yield "event: error\n"
-            yield _sse({"message":"上游模型暂时不可用,请稍后重试"})
-            yield "data: [DONE]\n\n"
+            async for ev in runtime.stream_turn(req.user_id, req.message, req.conversation_id):
+                if ev['type'] == 'tool':
+                    yield _sse({'event': 'tool', 'name': ev['name']})
+                elif ev['type'] == 'delta':
+                    yield _sse({'delta': ev['text']})
+                elif ev['type'] == 'citations':
+                    yield _sse({'event': 'citations', 'items': ev['items']})
+                else:
+                    if ev['type'] == 'done':
+                        yield _sse({'event': 'done', 'conversation_id': ev['conversation_id']})
+        except runtime.ConversationNotFound:
+            for f in _sse_error('会话不存在'):
+                yield f
             return
-        store.append(req.session_id,user,AIMessage(''.join(answer)))
-        yield "data: [DONE]\n\n"
-    return StreamingResponse(event_stream(),media_type="text/event-stream")
+        except SQLAlchemyError:
+            logger.exception('数据库错误 user_id=%s', req.user_id)
+            for f in _sse_error('数据库暂时不可用,请稍后重试'):
+                yield f
+            return
+        except Exception:
+            logger.exception('图编排失败 user_id=%s', req.user_id)
+            for f in _sse_error('上游模型暂时不可用,请稍后重试'):
+                yield f
+            return
+        yield 'data: [DONE]\n\n'
+    return StreamingResponse(event_stream(), media_type='text/event-stream')

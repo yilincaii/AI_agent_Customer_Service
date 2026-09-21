@@ -3,6 +3,7 @@
 <h1>MewHelp</h1><div id="messages"></div>
 <form id="chat"><input id="message" required><button>发送</button></form>
 <script>
+let conversationId=null;
 const sessionId=crypto.randomUUID();
 const log=document.getElementById('messages');
 document.getElementById('chat').addEventListener('submit',async(event)=>{
@@ -10,7 +11,7 @@ document.getElementById('chat').addEventListener('submit',async(event)=>{
   const user=document.createElement('p');user.textContent=input.value;log.append(user);
   const reply=document.createElement('p');log.append(reply);
   const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({session_id:sessionId,message:input.value})});input.value='';
+    body:JSON.stringify({user_id:sessionId,conversation_id:conversationId,message:input.value})});input.value='';
   if(!response.ok){reply.textContent='请求失败';return;}
   const reader=response.body.getReader();const decoder=new TextDecoder();let pending='';
   while(true){
@@ -20,6 +21,7 @@ document.getElementById('chat').addEventListener('submit',async(event)=>{
       for(const line of frame.split('\n')){
         if(!line.startsWith('data: ')||line==='data: [DONE]')continue;
         const payload=JSON.parse(line.slice(6));
+        if(payload.event==="done")conversationId=payload.conversation_id;
         if(payload.delta)reply.textContent+=payload.delta;
         if(payload.message)reply.textContent=payload.message;
       }

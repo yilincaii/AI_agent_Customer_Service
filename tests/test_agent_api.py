@@ -1,43 +1,70 @@
-from unittest.mock import AsyncMock
-import pytest
 from fastapi.testclient import TestClient
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from sqlalchemy.exc import SQLAlchemyError
+from app.api import agent
+from app.graph import runtime
+from app.main import app
 
-@pytest.fixture
-def agent(monkeypatch):
-    import app.api.agent as api
-    monkeypatch.setattr(api.repository,"create_conversation",AsyncMock(return_value=1))
-    monkeypatch.setattr(api.repository,"get_conversation",AsyncMock(return_value=None))
-    monkeypatch.setattr(api.repository,"list_messages",AsyncMock(return_value=[]))
-    monkeypatch.setattr(api.repository,"append_message",AsyncMock(return_value=1))
-    monkeypatch.setattr(api,"get_all_specs",AsyncMock(return_value=[]))
-    return api
+def _fake_state_with_tool_trace():
+    ai = AIMessage('', tool_calls=[{'name': 'query_logistics', 'args': {'order_id': '1001'}, 'id': 'c1'}])
+    tm = ToolMessage(content='{"status":"运输中"}', tool_call_id='c1', name='query_logistics')
+    final_ai = AIMessage('订单 1001 正在运输中。')
+    return {'messages': [HumanMessage('订单 1001 到哪了'), ai, tm, final_ai], 'conversation_id': 12}
 
-async def test_direct_agent_answers_and_persists(agent,monkeypatch):
-    class Model:
-        def bind_tools(self,tools):return self
-        async def ainvoke(self,messages):return AIMessage(content="Hello")
-    monkeypatch.setattr(agent,"get_chat_model",lambda:Model())
-    from app.schemas.agent import AgentRequest
-    out=await agent.run_agent(AgentRequest(user_id="u1",message="hi"))
-    assert out.answer=="Hello" and out.conversation_id==1
-    assert agent.repository.append_message.await_count==2
+def test_agent_endpoint_returns_tool_trace(monkeypatch):
 
-async def test_agent_rejects_missing_conversation(agent):
-    from app.schemas.agent import AgentRequest
-    from fastapi import HTTPException
-    with pytest.raises(HTTPException) as e:await agent.run_agent(AgentRequest(user_id="u1",message="hi",conversation_id=99))
-    assert e.value.status_code==404
+    async def fake_run_turn(user_id, message, conversation_id):
+        return {'conversation_id': 12, 'state': _fake_state_with_tool_trace()}
+    monkeypatch.setattr(agent.runtime, 'run_turn', fake_run_turn)
+    client = TestClient(app)
+    r = client.post('/api/agent', json={'user_id': 'u1', 'message': '订单 1001 到哪了'})
+    assert r.status_code == 200
+    body = r.json()
+    assert body['conversation_id'] == 12
+    assert body['answer'] == '订单 1001 正在运输中。'
+    assert body['tool_calls'][0]['name'] == 'query_logistics'
+    assert body['tool_results'][0]['ok'] is True
 
-async def test_agent_bounds_repeated_tool_calls(agent,monkeypatch):
-    class Model:
-        count=0
-        def bind_tools(self,tools):return self
-        async def ainvoke(self,messages):
-            self.count+=1
-            return AIMessage(content="",tool_calls=[{"id":str(self.count),"name":"missing","args":{}}])
-    model=Model();monkeypatch.setattr(agent,"get_chat_model",lambda:model)
-    from app.schemas.agent import AgentRequest
-    out=await agent.run_agent(AgentRequest(user_id="u1",message="hi"))
-    assert model.count==agent.settings.max_agent_steps
-    assert len(out.tool_results)==model.count and not any(r.ok for r in out.tool_results)
+def test_agent_endpoint_chitchat_has_no_tool_calls(monkeypatch):
+
+    async def fake_run_turn(user_id, message, conversation_id):
+        state = {'messages': [HumanMessage('你好'), AIMessage('你好呀,有什么可以帮你?')], 'answer': '你好呀,有什么可以帮你?', 'conversation_id': 13}
+        return {'conversation_id': 13, 'state': state}
+    monkeypatch.setattr(agent.runtime, 'run_turn', fake_run_turn)
+    client = TestClient(app)
+    r = client.post('/api/agent', json={'user_id': 'u1', 'message': '你好'})
+    assert r.status_code == 200
+    body = r.json()
+    assert body['tool_calls'] == []
+    assert body['tool_results'] == []
+
+def test_agent_endpoint_404_on_unknown_conversation(monkeypatch):
+
+    async def fake_run_turn(*a, **k):
+        raise runtime.ConversationNotFound(999)
+    monkeypatch.setattr(agent.runtime, 'run_turn', fake_run_turn)
+    client = TestClient(app)
+    r = client.post('/api/agent', json={'user_id': 'u1', 'message': 'hi', 'conversation_id': 999})
+    assert r.status_code == 404
+
+def test_agent_endpoint_503_on_db_error(monkeypatch):
+
+    async def fake_run_turn(*a, **k):
+        raise SQLAlchemyError('boom')
+    monkeypatch.setattr(agent.runtime, 'run_turn', fake_run_turn)
+    client = TestClient(app)
+    r = client.post('/api/agent', json={'user_id': 'u1', 'message': 'hi'})
+    assert r.status_code == 503
+
+def test_agent_endpoint_502_on_generic_failure(monkeypatch):
+
+    async def fake_run_turn(*a, **k):
+        raise RuntimeError('upstream boom')
+    monkeypatch.setattr(agent.runtime, 'run_turn', fake_run_turn)
+    client = TestClient(app)
+    r = client.post('/api/agent', json={'user_id': 'u1', 'message': 'hi'})
+    assert r.status_code == 502
+
+def test_agent_endpoint_422_on_missing_fields():
+    client = TestClient(app)
+    assert client.post('/api/agent', json={'message': 'hi'}).status_code == 422
