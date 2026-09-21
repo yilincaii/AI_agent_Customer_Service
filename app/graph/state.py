@@ -20,8 +20,10 @@ class ConversationState(TypedDict, total=False):
     messages: Annotated[list[AnyMessage], add_messages]
     user_id: str
     conversation_id: int
+    route: str
     evidence: str
     citations: list
+    evidence_strong: bool
     answer: str
     steps: int
     tokens_used: int

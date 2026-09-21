@@ -22,3 +22,6 @@ def should_continue(state) -> str:
     if state.get("steps", 0) >= settings.max_agent_steps:
         return "stop"
     return "continue"
+
+def confidence_gate(state):return "strong" if state.get("evidence_strong") else "weak"
+def route_by_intent(state):return state.get("route","business")

@@ -177,3 +177,18 @@ EXPAND_QUERIES_SYSTEM = """## 角色
 EXPAND_QUERIES_PROMPT = ChatPromptTemplate.from_messages(
     [("system", EXPAND_QUERIES_SYSTEM), ("human", "用户问题:{query}")]
 )
+
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+CHITCHAT_REPLY_TEXT = "你好呀~我是喵喵优选的智能客服小喵。商品、订单、物流、售后都可以问我哦,有什么能帮您的?"
+
+COMPLAINT_REPLY_TEXT = "非常抱歉给您带来了不好的体验,我理解您的心情。您可以选择转接人工客服,或让我为您登记一张工单跟进处理。"
+
+FALLBACK_REPLY_TEXT = "抱歉,这个问题我暂时没有查到确切信息,不敢乱答。建议您联系人工客服进一步确认,以免给您错误的指引。"
+
+SCRIPT_REPLY_CHITCHAT = "我暂时还不会回答这个,请告诉我你对我们产品的任何咨询~商品、订单、物流、售后都可以问我哦。"
+
+SCRIPT_REPLY_OTHER = "抱歉,我不太确定您的意思。您可以把问题说得更具体些吗?比如您想咨询的商品、某个订单,或退款/售后问题。"
