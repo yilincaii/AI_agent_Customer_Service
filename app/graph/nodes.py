@@ -100,3 +100,35 @@ async def complaint_reply(state) -> dict:
     ]
     return {"answer": COMPLAINT_REPLY, "suggested_actions": actions,
             "trace": {"route": "complaint"}}
+
+from app.core import coref
+from app.core import intent as intent_mod
+from app.graph.routing import INTENT_TO_ROUTE
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+async def resolve_reference(state) -> dict:
+    """指代消解 + Query 改写(合一):吃最近几轮历史把半截话补成完整问句;已完整则透传。
+    写 resolved_query,供 classify_intent 与 refund_flow 检索共用(意图识别不再改写)。"""
+    query = _user_text(state)
+    history = _history_text(state)
+    # ch07 验收可观测:每轮必经此节点,摘要行+滑窗在这一条日志里直接可见
+    # (model_ctx 只在进 main_agent 的路由才有,闲聊/兜底路由靠这条看)
+    logger.info("history_ctx conv=%s(摘要行+滑窗,coref/意图共用)\n%s",
+                state.get("conversation_id"), history or "(无历史)")
+    resolved = await coref.resolve(query, history)
+    mode = "rewrite" if resolved != query else "passthrough"
+    return {"resolved_query": resolved, "trace": {"coref": mode}}
+
+async def classify_intent(state) -> dict:
+    """意图四件套:八类 + confidence + 「其他」兜底。吃 resolved_query(空则回落原话)+ 最近历史
+    判当前意图(应对物流→退款→物流漂移)。把归属出口 route 落进 State(供 _agent_messages 判注入、
+    log 留痕;route_by_intent 条件边按同一 INTENT_TO_ROUTE 分流,单一来源不漂移)。"""
+    query = state.get("resolved_query") or _user_text(state)
+    r = await intent_mod.classify(query, _history_text(state))
+    intent, conf = r["intent"], r["confidence"]
+    route = INTENT_TO_ROUTE.get(intent, "business")
+    return {"intent": intent, "intent_confidence": conf, "route": route,
+            "trace": {"intent": intent, "intent_confidence": conf, "route": route}}

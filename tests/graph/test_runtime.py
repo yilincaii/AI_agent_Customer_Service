@@ -7,6 +7,9 @@ async def test_checkpoint_reuses_history_and_resets_trace(monkeypatch):
     async def reply(state,config=None):return {"messages":[AIMessage("hello")],"steps":1}
     async def no_log(state):return {}
     monkeypatch.setattr(nodes,"main_agent",reply);monkeypatch.setattr(nodes,"log_node",no_log)
+    async def resolve(state):return {"resolved_query":"q"}
+    async def classify(state):return {"intent":"订单","route":"business"}
+    monkeypatch.setattr(nodes,"resolve_reference",resolve);monkeypatch.setattr(nodes,"classify_intent",classify)
     await runtime.init_graph()
     try:
         graph=runtime.get_graph();config={"configurable":{"thread_id":"42"}}

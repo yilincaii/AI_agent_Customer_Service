@@ -2,10 +2,34 @@
 # 后端八股网站：xiaolincoding.com
 # Agent网站：xiaolinnote.com
 # 简历模版：jianli.xiaolinnote.com
-
 from langchain_core.messages import AIMessage
 
 from app.config import settings
+
+# 九类意图 → 五出口(写死的分流规则,spec §3.1 / README route_by_intent;
+# 返回值 = build.py 条件边映射键,单一来源不漂移)
+INTENT_TO_ROUTE: dict[str, str] = {
+    "投诉": "escalate",
+    "闲聊": "fallback_script",
+    "其他": "fallback_script",
+    "商品咨询": "knowledge",
+    "退款退货": "business",
+    "售后": "business",
+    "人工": "business",   # ch08:明确要求建工单/转人工 → 主力 Agent 走 create_ticket 确认流
+    "物流": "business",
+    "订单": "business",
+}
+
+
+def route_by_intent(state) -> str:
+    """按意图分流;未知意图保守归 business(让 Agent 自己应对)。"""
+    return INTENT_TO_ROUTE.get(state.get("intent", ""), "business")
+
+
+def confidence_gate(state) -> str:
+    """知识路生成前证据闸:强放行、弱兜底。"""
+    return "strong" if state.get("evidence_strong") else "weak"
+
 
 def should_continue(state) -> str:
     """ReAct 停止条件:无 tool_calls 就收敛,步数封顶则强停,否则继续。
@@ -22,6 +46,3 @@ def should_continue(state) -> str:
     if state.get("steps", 0) >= settings.max_agent_steps:
         return "stop"
     return "continue"
-
-def confidence_gate(state):return "strong" if state.get("evidence_strong") else "weak"
-def route_by_intent(state):return state.get("route","business")

@@ -65,9 +65,9 @@ def _thinking_kwargs() -> dict:
 
 
 def resolve_slot(slot="chat"):
-    if slot != "chat":
-        raise ValueError("Only the chat model slot exists in this snapshot")
-    return settings.chat_model,settings.chat_base_url,settings.chat_api_key
+    if slot=="chat": return settings.chat_model,settings.chat_base_url,settings.chat_api_key
+    if slot=="intent": return settings.intent_model or settings.chat_model,settings.intent_base_url or settings.chat_base_url,settings.intent_api_key or settings.chat_api_key
+    raise ValueError("Unknown model slot")
 
 logger=logging.getLogger(__name__)
 # 来源：公众号@小林coding

@@ -31,5 +31,11 @@ class Settings(BaseSettings):
     subquery_split: bool = True   # 一问多意图时按子句拆开各检索一遍再轮转合并(见 retrieval)
     rerank_min_score: float = 0.3 # 重排最高分低于此 → 检索证据低,拒答
     checkpointer_db_path: str = "data/ch05_checkpoints.sqlite"  # LangGraph checkpointer(data/*.db* 已 gitignore)
+    intent_base_url: str = ""         # 空=回落 chat_base_url
+    intent_api_key: str = ""          # 空=回落 chat_api_key
+    intent_model: str = ""            # 意图识别模型名;空=回落 chat_model
+    intent_small_model: str = ""      # 降级路小模型(种子,未接运行时)
+    intent_mode: str = "accuracy"     # accuracy=只用大模型;cost=小模型判→低置信升级大模型(未实现)
+    intent_conf_threshold: float = 0.6  # cost 模式升级阈值(种子)
 
 settings = Settings()
