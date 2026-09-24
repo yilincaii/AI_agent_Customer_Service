@@ -9,6 +9,18 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from app.graph import nodes
 
+def test_agent_messages_injects_evidence_on_knowledge():
+    msgs = nodes._agent_messages(
+        {"route": "knowledge", "evidence": "[1] 退货: 7天",
+         "messages": [HumanMessage("能退吗")]})
+    # 证据进的是用户侧消息,不进 system——system 要保持逐字不变才能命中前缀缓存
+    assert isinstance(msgs[0], SystemMessage)
+    assert "[1] 退货: 7天" not in msgs[0].content
+    ctx = [m for m in msgs if isinstance(m, HumanMessage) and "[1] 退货: 7天" in m.content]
+    assert len(ctx) == 1
+    assert "query_faq" in ctx[0].content            # 指示别再检索,跟着证据一起搬过来了
+    assert msgs[-2].content == "能退吗" and msgs[-1] is ctx[0]   # 紧跟用户那句之后
+
 def test_agent_messages_no_evidence_on_business():
     msgs = nodes._agent_messages({"route": "business", "messages": [HumanMessage("订单1001")]})
     assert isinstance(msgs[0], SystemMessage)

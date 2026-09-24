@@ -28,3 +28,5 @@ eval-check:
 	PYTHONPATH=. uv run python scripts/validate_eval_ch04.py
 judge-check:
 	PYTHONPATH=. uv run python scripts/judge_check.py
+eval-workflow:
+	PYTHONPATH=. uv run python scripts/eval_ch06.py
