@@ -46,3 +46,6 @@ app.include_router(rageval_router)
 @app.get("/rag-eval")
 def rageval_page():
     return FileResponse(Path(__file__).parent / "static" / "rageval.html")
+
+from app.api.actions import router as actions_router
+app.include_router(actions_router)

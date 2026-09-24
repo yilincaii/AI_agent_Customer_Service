@@ -109,3 +109,11 @@ async def db_session_factory(_test_engine, monkeypatch):
 async def db_clean():
     """占位:表由 _test_engine 每个测试重建,无需额外清理。保留以兼容测试签名。"""
     yield
+
+@pytest.fixture()
+def client():
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from app.api.actions import router
+    app=FastAPI();app.include_router(router)
+    return TestClient(app)

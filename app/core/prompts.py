@@ -248,3 +248,17 @@ INTENT_CLASSIFY_PROMPT = ChatPromptTemplate.from_messages(
     [("system", INTENT_CLASSIFY_SYSTEM),
      ("human", "最近对话(可空):\n{history}\n\n当前用户这句话:{query}")]
 )
+
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+REFUND_JUDGE_HINT = (
+    "\n\n## 退款判定任务(仅本轮)\n"
+    "下面给出该订单数据与检索到的退换货政策证据。请只判断这一单能不能退款:\n"
+    "- 能退:调用 submit_refund 工具(传该订单号),并用一句话告诉用户这一单可以退、简述依据;\n"
+    "- 不能退:不要调用任何工具,说清不能退的原因,并告知可联系人工客服进一步确认。\n"
+    "依据政策证据判断,不要臆造条款;时效/金额表述以平台售后规则为准。\n"
+    "## 订单数据\n"
+)

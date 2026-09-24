@@ -29,3 +29,7 @@ class AgentResponse(BaseModel):
     answer: str
     tool_calls: list[ToolCallView]
     tool_results: list[ToolResultView]
+    suggested_actions: list = Field(default_factory=list)
+    interrupt: dict | None = Field(
+        default=None,
+        description="中断负载(含 type:select_order 带 orders / confirm_ticket 带 preview);无则 None")

@@ -52,6 +52,19 @@ def get_graph():
         raise RuntimeError("图未初始化,应在 FastAPI lifespan 调 init_graph()")
     return _graph
 
+async def get_turn_snapshot(conversation_id: int) -> dict:
+    """👎 快照尽力回捞(ch09):读该会话 checkpointer 终态,返回最近一轮的用户问题与召回快照。
+    调用方拿去比对被踩的 question,对得上才用快照——踩历史消息时快照可能已是别轮的,不硬塞。"""
+    config = {"configurable": {"thread_id": str(conversation_id)}}
+    st = await get_graph().aget_state(config)
+    values = getattr(st, "values", None) or {}
+    question = ""
+    for m in reversed(values.get("messages", [])):
+        if getattr(m, "type", "") == "human":
+            question = m.content if isinstance(m.content, str) else ""
+            break
+    return {"question": question, "snapshot": values.get("retrieved_snapshot") or []}
+
 def dedup_actions(actions: list) -> list:
     """跨多个 ReAct 轮次累积的 suggested_actions 可能重复(如 agent 多次提议
     create_ticket);按 type 去重,保留每种 type 首次出现的那条。"""
@@ -118,6 +131,16 @@ async def run_turn(user_id, message, conversation_id) -> dict:
         _graph_input(user_id, message, cid, msg_id, summary, upto, layer1), config)
     return {"conversation_id": cid, "state": final, "interrupt": _interrupt_payload(final)}
 
+async def resume_turn(conversation_id: int, resume_value) -> dict:
+    """非流式续跑(供 /api/agent、eval):Command(resume) 回填后跑到下一个中断或结束。"""
+    if await repository.get_conversation(conversation_id) is None:
+        raise ConversationNotFound(conversation_id)
+    config = {"configurable": {"thread_id": str(conversation_id)},
+              "metadata": {"langfuse_session_id": str(conversation_id)}}
+    final = await get_graph().ainvoke(Command(resume=resume_value), config)
+    return {"conversation_id": conversation_id, "state": final,
+            "interrupt": _interrupt_payload(final)}
+
 async def _stream_events(cid: int, stream_source) -> AsyncIterator[dict]:
     """astream 多模式 → 事件 dict。stream_source 为 _graph_input(...)(新一轮)或 Command(resume=...)(续跑)。
     遇 interrupt(updates 块含 __interrupt__,Task 1 冒烟钉死)→ 吐 interrupt 事件并结束本次流
@@ -172,4 +195,11 @@ async def stream_turn(user_id, message, conversation_id) -> AsyncIterator[dict]:
     msg_id = await repository.append_message(cid, "user", content=message)
     async for ev in _stream_events(
             cid, _graph_input(user_id, message, cid, msg_id, summary, upto, layer1)):
+        yield ev
+
+async def stream_resume(conversation_id: int, resume_value) -> AsyncIterator[dict]:
+    """前端点选订单后续跑同一会话的暂停流(Command(resume) 续 astream,事件与 stream_turn 同构)。"""
+    if await repository.get_conversation(conversation_id) is None:
+        raise ConversationNotFound(conversation_id)
+    async for ev in _stream_events(conversation_id, Command(resume=resume_value)):
         yield ev

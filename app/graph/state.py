@@ -23,6 +23,8 @@ class ConversationState(TypedDict, total=False):
     intent: str
     resolved_query: str
     intent_confidence: float
+    order_id: str
+    order_data: dict
     route: str
     evidence: str
     citations: list
