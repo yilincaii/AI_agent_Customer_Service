@@ -19,10 +19,26 @@ class Conversation(Base):
     status: Mapped[str] = mapped_column(
         Enum("进行中", "已转人工", "已结束"), server_default="进行中"
     )
+    summary: Mapped[str | None] = mapped_column(Text, nullable=True)               # ch07 早期轮次滚动摘要
+    summary_upto_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # 摘要覆盖到的消息 id
+    layer1_from_msg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # 层1(原文)起点,此 id 之前渲染成半压形态
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
     )
+
+class ConversationSummary(Base):
+    """分段摘要:一段一行,只追加。压完的段落不再回炉重压。"""
+
+    __tablename__ = "conversation_summaries"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    seq: Mapped[int] = mapped_column(Integer)                    # 第几段,从 1 开始
+    from_msg_id: Mapped[int] = mapped_column(BigInteger)         # 覆盖的消息区间,闭区间
+    upto_msg_id: Mapped[int] = mapped_column(BigInteger)
+    content: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
 class Message(Base):
     __tablename__ = "messages"

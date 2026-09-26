@@ -37,5 +37,6 @@ class Settings(BaseSettings):
     intent_small_model: str = ""      # 降级路小模型(种子,未接运行时)
     intent_mode: str = "accuracy"     # accuracy=只用大模型;cost=小模型判→低置信升级大模型(未实现)
     intent_conf_threshold: float = 0.6  # cost 模式升级阈值(种子)
+    summary_inject_segments: int = 3        # 注入时带最近几段摘要
 
 settings = Settings()

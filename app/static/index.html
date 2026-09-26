@@ -1113,7 +1113,13 @@
     // ---------- ch07:会话侧栏(列表 / 切换 / 历史回载) ----------
     const convListEl = document.getElementById("conv-list");
 
-    function loadConversations() {}
+    async function loadConversations() {
+      try {
+        const r = await fetch("/api/conversations?user_id=" + encodeURIComponent(getUserId()));
+        if (!r.ok) return;
+        renderConvList((await r.json()).items || []);
+      } catch (e) { /* 侧栏失败不影响聊天 */ }
+    }
 
     function renderConvList(items) {
       convListEl.innerHTML = "";
@@ -1149,7 +1155,36 @@
         actions: [{ type: "transfer_human" }, { type: "create_ticket", draft: {} }] },
     ];
 
-    function switchConversation() {}
+    async function switchConversation(cid) {
+      // 已是当前会话且聊天区有内容才跳过;页面刚刷新时聊天区是空的,点当前会话也要回载
+      if (cid === getConversationId() && messagesEl.querySelector(".row")) return;
+      setConversationId(cid);
+      messagesEl.innerHTML = "";
+      try {
+        const r = await fetch("/api/conversations/" + cid + "/messages");
+        if (r.ok) {
+          for (const m of ((await r.json()).items || [])) {
+            if (!m.content) continue;
+            if (m.role === "user") {
+              addRow("user").textContent = m.content;
+            } else {
+              const bubble = addRow("bot");
+              const textEl = document.createElement("div");
+              textEl.className = "bubble-text";
+              textEl.innerHTML = renderMarkdown(m.content);
+              bubble.appendChild(textEl);
+              const hit = REPLAY_ACTIONS.find((ra) => m.content.trim() === ra.text);
+              if (hit) renderActions(bubble, hit.actions);
+              addFeedbackBar(bubble);   // 反馈条(👍/👎)回载也要有,和直播轮一致
+            }
+          }
+        }
+      } catch (e) { /* 历史加载失败仍可继续聊 */ }
+      if (!messagesEl.children.length) renderEmptyState();
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      loadConversations();   // 刷新 active 高亮
+      inputEl.focus();
+    }
 
     function autoGrow() {
       inputEl.style.height = "auto";

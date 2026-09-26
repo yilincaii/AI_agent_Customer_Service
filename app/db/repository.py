@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy import case, func, select, update
 import app.db.base as db
 from app.config import settings
-from app.db.models import Conversation, Message, Faq, Ticket, KnowledgeChunk, QaExtractionStaging, LowConfidenceQuestion, FaithCase
+from app.db.models import Conversation, Message, Faq, Ticket, KnowledgeChunk, QaExtractionStaging, LowConfidenceQuestion, FaithCase, ConversationSummary
 
 # 来源：公众号@小林coding
 # 后端八股网站：xiaolincoding.com
@@ -75,6 +75,105 @@ async def create_ticket(conversation_id: int, description: str, ticket_type: str
             conv.status = "已转人工"
         await s.commit()
     return ticket_no
+
+async def count_messages_after(conversation_id: int, after_id: int | None) -> int:
+    """距上次摘要新增了多少条(after_id 空 = 从未摘要,数全量)。摘要触发判据。
+    注:此处数全角色,摘要源 list_dialog_messages 只取 user/assistant——当前一致
+    (tool 不落库);若未来 tool 行落库,两处口径需同步收紧。"""
+    async with db.async_session() as s:
+        q = (select(func.count()).select_from(Message)
+             .where(Message.conversation_id == conversation_id))
+        if after_id:
+            q = q.where(Message.id > after_id)
+        return int((await s.execute(q)).scalar_one())
+
+async def list_dialog_messages(conversation_id: int) -> list[Message]:
+    """user/assistant 消息按 id 升序(摘要任务源数据;tool 行不落库,过滤一道保险)。"""
+    async with db.async_session() as s:
+        result = await s.execute(
+            select(Message)
+            .where(Message.conversation_id == conversation_id,
+                   Message.role.in_(("user", "assistant")))
+            .order_by(Message.id)
+        )
+        return list(result.scalars())
+
+async def list_conversations(user_id: str, limit: int = 50) -> list[dict]:
+    """某用户的会话列表(新在前,带首问预览 + 有无摘要标记),前端多会话切换用。"""
+    async with db.async_session() as s:
+        convs = list((await s.execute(
+            select(Conversation).where(Conversation.user_id == user_id)
+            .order_by(Conversation.id.desc()).limit(limit)
+        )).scalars())
+        out = []
+        for c in convs:
+            first = (await s.execute(
+                select(Message.content)
+                .where(Message.conversation_id == c.id, Message.role == "user")
+                .order_by(Message.id).limit(1)
+            )).scalar()
+            out.append({
+                "id": c.id, "status": c.status,
+                "preview": (first or "(空会话)")[:40],
+                "has_summary": bool(c.summary),
+                "updated_at": c.updated_at.isoformat() if c.updated_at else None,
+            })
+        return out
+
+async def update_conversation_summary(conversation_id: int, summary: str, upto_msg_id: int) -> None:
+    """摘要成功后原子更新两字段(一起写,不会出现摘要新边界旧)。"""
+    async with db.async_session() as s:
+        conv = await s.get(Conversation, conversation_id)
+        if conv is not None:
+            conv.summary = summary
+            conv.summary_upto_msg_id = upto_msg_id
+            await s.commit()
+
+async def update_layer1_from(conversation_id: int, msg_id: int) -> None:
+    """层 1 起点往后挪。只在超预算时挪一次,两次之间不动——边界稳,渲染才逐字节稳。"""
+    async with db.async_session() as s:
+        conv = await s.get(Conversation, conversation_id)
+        if conv is not None:
+            conv.layer1_from_msg_id = msg_id
+            await s.commit()
+
+async def append_summary_segment(conversation_id: int, from_msg_id: int,
+                                 upto_msg_id: int, content: str) -> int:
+    """追加一段摘要,同时把 conversations 的边界和拼好的投影一起更新。
+
+    段落只追加不改写:已有的段不会再进模型,里面的订单号这类事实压过一次就定死了。
+    conversations.summary 存的是最近若干段拼好的结果,读的时候少一次查询。"""
+    async with db.async_session() as s:
+        # 先把已有的几段读出来再 add:反过来的话 autoflush 会把新段也算进这次查询,
+        # 拼投影时它就出现两次。
+        prev = (await s.execute(
+            select(ConversationSummary.seq, ConversationSummary.content)
+            .where(ConversationSummary.conversation_id == conversation_id)
+            .order_by(ConversationSummary.seq.desc())
+            .limit(max(settings.summary_inject_segments - 1, 0))
+        )).all()
+        seq = (prev[0].seq if prev else 0) + 1
+        s.add(ConversationSummary(conversation_id=conversation_id, seq=seq,
+                                  from_msg_id=from_msg_id, upto_msg_id=upto_msg_id,
+                                  content=content))
+        conv = await s.get(Conversation, conversation_id)
+        if conv is not None:
+            conv.summary = "\n".join([*(r.content for r in reversed(prev)), content])
+            conv.summary_upto_msg_id = upto_msg_id
+        await s.commit()
+        return seq
+
+async def list_summary_segments(conversation_id: int, limit: int | None = None) -> list[str]:
+    """取最近几段,按时间正序返回。再老的梗概对当前问题基本没用,不必全带。"""
+    n = settings.summary_inject_segments if limit is None else limit
+    async with db.async_session() as s:
+        rows = (await s.execute(
+            select(ConversationSummary.content)
+            .where(ConversationSummary.conversation_id == conversation_id)
+            .order_by(ConversationSummary.seq.desc())
+            .limit(n)
+        )).scalars().all()
+        return list(reversed(rows))
 
 async def insert_knowledge_chunk(
     category: str, questions: str, answer: str,

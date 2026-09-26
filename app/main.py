@@ -49,3 +49,6 @@ def rageval_page():
 
 from app.api.actions import router as actions_router
 app.include_router(actions_router)
+
+from app.api.conversations import router as conversations_router
+app.include_router(conversations_router)
