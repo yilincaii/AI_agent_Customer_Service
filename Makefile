@@ -30,3 +30,5 @@ judge-check:
 	PYTHONPATH=. uv run python scripts/judge_check.py
 eval-workflow:
 	PYTHONPATH=. uv run python scripts/eval_ch06.py
+eval-context:
+	PYTHONPATH=. uv run python scripts/eval_ch07.py
