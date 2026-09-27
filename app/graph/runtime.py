@@ -10,6 +10,7 @@ from langgraph.types import Command
 from app.config import settings
 from app.db import repository
 from app.graph.build import build_graph
+from app.core import summarizer,budget,memory
 # 来源：公众号@小林coding
 # 后端八股网站：xiaolincoding.com
 # Agent网站：xiaolinnote.com
@@ -87,8 +88,8 @@ async def _ensure_conversation(user_id: str,
     conv = await repository.get_conversation(conversation_id)
     if conv is None:
         raise ConversationNotFound(conversation_id)
-    return (conversation_id, "",
-            0, 0)
+    return (conversation_id, conv.summary or "",
+            conv.summary_upto_msg_id or 0, conv.layer1_from_msg_id or 0)
 
 def _graph_input(user_id: str, message: str, cid: int, msg_id: int,
                  summary: str, summary_upto: int, layer1_from: int = 0) -> dict:
@@ -120,6 +121,33 @@ async def _final_state(cid: int) -> dict:
     snap = await get_graph().aget_state({"configurable": {"thread_id": str(cid)}})
     return snap.values if snap else {}
 
+async def settle_layers(cid: int, state: dict | None,
+                        summary_upto: int, layer1_from: int) -> None:
+    """轮末结算分层:层 1 超预算就把起点往后挪一批。
+
+    纯计算,不调模型,不阻塞。挪一次挪到位、两次之间不动——边界稳住,渲染才逐字节
+    稳定,前缀缓存才保得住;每轮微调等于每轮重写中间内容,缓存天天作废。
+
+    state 传 None 时自己去 checkpointer 取(流式路径拿不到终态)。整段吞异常:
+    这是轮末的锦上添花,不能影响已经发出去的回复。"""
+    try:
+        if state is None:
+            state = await _final_state(cid)
+        msgs = (state or {}).get("messages") or []
+        if not msgs:
+            return
+        l1_budget = int(budget.compute().sliding * settings.layer1_ratio)
+        _, layer1_tok = memory.layer_tokens(msgs, summary_upto, layer1_from)
+        if layer1_tok <= l1_budget:
+            return
+        new_from = memory.next_layer1_from(msgs, summary_upto, l1_budget)
+        if new_from > layer1_from:
+            await repository.update_layer1_from(cid, new_from)
+            logger.info("层1 降级 conv=%s %s→%s(层1 %s > 预算 %s)",
+                        cid, layer1_from, new_from, layer1_tok, l1_budget)
+    except Exception:
+        logger.exception("分层结算失败 conv=%s(不影响本轮回复)", cid)
+
 async def run_turn(user_id, message, conversation_id) -> dict:
     """非流式:落 user 消息 → ainvoke → 返回终态(供 /api/agent、eval)。遇 interrupt 带 orders。"""
     cid, summary, upto, layer1 = await _ensure_conversation(user_id, conversation_id)
@@ -129,6 +157,8 @@ async def run_turn(user_id, message, conversation_id) -> dict:
               "metadata": {"langfuse_session_id": str(cid)}}
     final = await get_graph().ainvoke(
         _graph_input(user_id, message, cid, msg_id, summary, upto, layer1), config)
+    await settle_layers(cid, final, upto, layer1)  # 层1 超预算就降级一批(纯计算)
+    await summarizer.maybe_schedule_summary(cid)   # ch07 轮后触发检查(后台跑,不阻塞返回)
     return {"conversation_id": cid, "state": final, "interrupt": _interrupt_payload(final)}
 
 async def resume_turn(conversation_id: int, resume_value) -> dict:
@@ -138,6 +168,7 @@ async def resume_turn(conversation_id: int, resume_value) -> dict:
     config = {"configurable": {"thread_id": str(conversation_id)},
               "metadata": {"langfuse_session_id": str(conversation_id)}}
     final = await get_graph().ainvoke(Command(resume=resume_value), config)
+    await summarizer.maybe_schedule_summary(conversation_id)
     return {"conversation_id": conversation_id, "state": final,
             "interrupt": _interrupt_payload(final)}
 
@@ -196,6 +227,8 @@ async def stream_turn(user_id, message, conversation_id) -> AsyncIterator[dict]:
     async for ev in _stream_events(
             cid, _graph_input(user_id, message, cid, msg_id, summary, upto, layer1)):
         yield ev
+    await settle_layers(cid, None, upto, layer1)   # 流式拿不到终态,内部自取
+    await summarizer.maybe_schedule_summary(cid)   # ch07 流吐完再触发(后台跑,不阻塞)
 
 async def stream_resume(conversation_id: int, resume_value) -> AsyncIterator[dict]:
     """前端点选订单后续跑同一会话的暂停流(Command(resume) 续 astream,事件与 stream_turn 同构)。"""
@@ -203,3 +236,4 @@ async def stream_resume(conversation_id: int, resume_value) -> AsyncIterator[dic
         raise ConversationNotFound(conversation_id)
     async for ev in _stream_events(conversation_id, Command(resume=resume_value)):
         yield ev
+    await summarizer.maybe_schedule_summary(conversation_id)

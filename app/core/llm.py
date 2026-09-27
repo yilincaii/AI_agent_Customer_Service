@@ -1,22 +1,14 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 import logging
 from langchain_core.exceptions import OutputParserException
-# 来源：公众号@小林coding
-# 后端八股网站：xiaolincoding.com
-# Agent网站：xiaolinnote.com
-# 简历模版：jianli.xiaolinnote.com
 from langchain_openai import ChatOpenAI
 from app.config import settings
+_TRUTHY = {'1', 'true', 'yes', 'on'}
 
-# 来源：公众号@小林coding
-# 后端八股网站：xiaolincoding.com
-# Agent网站：xiaolinnote.com
-# 简历模版：jianli.xiaolinnote.com
-
-_TRUTHY = {"1", "true", "yes", "on"}
-
-def get_chat_model(streaming: bool = False, model: str | None = None,
-                   temperature: float | None = None, slot: str = "chat",
-                   thinking: bool = True) -> ChatOpenAI:
+def get_chat_model(streaming: bool=False, model: str | None=None, temperature: float | None=None, slot: str='chat', thinking: bool=True) -> ChatOpenAI:
     """直连聊天上游,说 OpenAI 协议。
     model 显式覆盖模型名(意图识别可配更大模型求准),None 时回落 settings.chat_model。
     ch09:usage 统一收口——流式也回传 token(等效 stream_options.include_usage),
@@ -31,17 +23,8 @@ def get_chat_model(streaming: bool = False, model: str | None = None,
     结构化输出走 function_calling 必须关。不能只是不传——DeepSeek 默认 thinking 开着,
     不传等于开,所以 False 时显式发 disabled。"""
     slot_model, base_url, api_key = resolve_slot(slot)
-    thinking_kw = _thinking_kwargs() if thinking else {"extra_body": {"thinking": {"type": "disabled"}}}
-    return ChatOpenAI(
-        model=model or slot_model,
-        base_url=base_url,
-        api_key=api_key,
-        streaming=streaming,
-        stream_usage=False,
-        max_tokens=settings.max_output_tokens,   # Y:保险丝,防模型失控输出
-        temperature=0.3 if temperature is None else temperature,
-        **thinking_kw,
-    )
+    thinking_kw = _thinking_kwargs() if thinking else {'extra_body': {'thinking': {'type': 'disabled'}}}
+    return ChatOpenAI(model=model or slot_model, base_url=base_url, api_key=api_key, streaming=streaming, stream_usage=False, max_tokens=settings.max_output_tokens, temperature=0.3 if temperature is None else temperature, **thinking_kw)
 
 def _thinking_kwargs() -> dict:
     """把三项思考链配置拼成 ChatOpenAI 的参数。留空的不传,交给上游默认。
@@ -52,37 +35,29 @@ def _thinking_kwargs() -> dict:
     kwargs: dict = {}
     extra: dict = {}
     if settings.chat_thinking:
-        extra["thinking"] = {"type": settings.chat_thinking}
+        extra['thinking'] = {'type': settings.chat_thinking}
     if settings.chat_reasoning_split:
-        # 只认字面量 "true" 会把填 1 / yes / on 的人坑了:那几种写法本意是开,却会被转成
-        # False 显式发出去,等于亲手关掉这项兜底。填 false / 0 才是真的要关。
-        extra["reasoning_split"] = settings.chat_reasoning_split.strip().lower() in _TRUTHY
+        extra['reasoning_split'] = settings.chat_reasoning_split.strip().lower() in _TRUTHY
     if extra:
-        kwargs["extra_body"] = extra
+        kwargs['extra_body'] = extra
     if settings.chat_reasoning_effort:
-        kwargs["reasoning_effort"] = settings.chat_reasoning_effort
+        kwargs['reasoning_effort'] = settings.chat_reasoning_effort
     return kwargs
 
+def resolve_slot(slot: str='chat') -> tuple[str, str, str]:
+    """按用途取 (模型名, 地址, key)。intent / summary 各是一个槽位,三项分别留空就
+    回落 CHAT 那组——只用一家上游时它们一个都不用填,想把某个用途换到别家才填。"""
+    if slot == 'chat':
+        return (settings.chat_model, settings.chat_base_url, settings.chat_api_key)
+    return (getattr(settings, f'{slot}_model', '') or settings.chat_model, getattr(settings, f'{slot}_base_url', '') or settings.chat_base_url, getattr(settings, f'{slot}_api_key', '') or settings.chat_api_key)
+logger = logging.getLogger(__name__)
+_NO_STREAM_TOOLCALL_FAMILIES: tuple[str, ...] = ('minimax',)
 
-def resolve_slot(slot="chat"):
-    if slot=="chat": return settings.chat_model,settings.chat_base_url,settings.chat_api_key
-    if slot=="intent": return settings.intent_model or settings.chat_model,settings.intent_base_url or settings.chat_base_url,settings.intent_api_key or settings.chat_api_key
-    raise ValueError("Unknown model slot")
+def needs_non_streaming_tools(model: str | None=None, slot: str='chat') -> bool:
+    name = (model or resolve_slot(slot)[0] or '').lower()
+    return any((f in name for f in _NO_STREAM_TOOLCALL_FAMILIES))
 
-logger=logging.getLogger(__name__)
-# 来源：公众号@小林coding
-# 后端八股网站：xiaolincoding.com
-# Agent网站：xiaolinnote.com
-# 简历模版：jianli.xiaolinnote.com
-
-_NO_STREAM_TOOLCALL_FAMILIES: tuple[str, ...] = ("minimax",)
-
-def needs_non_streaming_tools(model: str | None = None, slot: str = "chat") -> bool:
-    name = (model or resolve_slot(slot)[0] or "").lower()
-    return any(f in name for f in _NO_STREAM_TOOLCALL_FAMILIES)
-
-def structured(schema, *, model: str | None = None, streaming: bool = True,
-               temperature: float | None = None, slot: str = "chat"):
+def structured(schema, *, model: str | None=None, streaming: bool=True, temperature: float | None=None, slot: str='chat'):
     """要结构化结果就用这个,别直接 with_structured_output——它默认走 json_schema,
     那条路解析正文,会被模型多吐的思考正文带崩。
 
@@ -95,27 +70,21 @@ def structured(schema, *, model: str | None = None, streaming: bool = True,
     temperature 透传给底层模型:当评委用的结构化链路传 0(见 get_chat_model 的说明)。
     """
     from langchain_core.runnables import RunnableLambda
-
     slot_model, slot_base, _ = resolve_slot(slot)
-    name = (model or slot_model or "").lower()
+    name = (model or slot_model or '').lower()
     if needs_non_streaming_tools(model, slot=slot):
-        streaming = False        # 这类模型流式不吐 tool_calls,见 _NO_STREAM_TOOLCALL_FAMILIES
-    m = get_chat_model(streaming=streaming, model=model, temperature=temperature,
-                       slot=slot, thinking=False)
-    fc = m.with_structured_output(schema, method="function_calling")
+        streaming = False
+    m = get_chat_model(streaming=streaming, model=model, temperature=temperature, slot=slot, thinking=False)
+    fc = m.with_structured_output(schema, method='function_calling')
 
     def _log(attempt: int, why: str) -> None:
-        # 带上通道:同一个模型换个上游行为就不一样,只打模型名排障时定位不到
-        logger.warning("%s 经 %s 的 function calling 第 %s 次没成(%s),%s",
-                       name, slot_base, attempt, why,
-                       "原样重试一次" if attempt == 1 else "抛给调用点")
+        logger.warning('%s 经 %s 的 function calling 第 %s 次没成(%s),%s', name, slot_base, attempt, why, '原样重试一次' if attempt == 1 else '抛给调用点')
 
     def _no_tool_calls() -> OutputParserException:
-        return OutputParserException(
-            f"{name} 经 {settings.chat_base_url} 连着两次都没返回 tool_calls")
+        return OutputParserException(f'{name} 经 {settings.chat_base_url} 连着两次都没返回 tool_calls')
 
     def _run(x):
-        for attempt in (1, 2):     # 偶发不返回 tool_calls,原样重试一次
+        for attempt in (1, 2):
             try:
                 r = fc.invoke(x)
             except Exception as e:
@@ -125,7 +94,7 @@ def structured(schema, *, model: str | None = None, streaming: bool = True,
                 continue
             if r is not None:
                 return r
-            _log(attempt, "响应里没有 tool_calls")
+            _log(attempt, '响应里没有 tool_calls')
         raise _no_tool_calls()
 
     async def _arun(x):
@@ -139,7 +108,6 @@ def structured(schema, *, model: str | None = None, streaming: bool = True,
                 continue
             if r is not None:
                 return r
-            _log(attempt, "响应里没有 tool_calls")
+            _log(attempt, '响应里没有 tool_calls')
         raise _no_tool_calls()
-
     return RunnableLambda(_run, afunc=_arun)

@@ -262,3 +262,24 @@ REFUND_JUDGE_HINT = (
     "依据政策证据判断,不要臆造条款;时效/金额表述以平台售后规则为准。\n"
     "## 订单数据\n"
 )
+
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+SUMMARY_SYSTEM = """## 角色
+你是客服对话摘要器。把早期的客服对话压成简洁摘要,供后续轮次当上下文用。
+
+## 规则
+- 只提炼事实与诉求:问过哪款商品、报过的订单号/手机号、用户的明确诉求、还没解决的问题
+- 对话里没出现的内容一个字不许编;寒暄闲聊不留
+- 已有的梗概只是背景,帮你读懂上下文;不要复述它、不要跟它合并,只压这一批新对话
+- 这批对话里没提到的事实,哪怕背景里有,也不要写进来
+- 长度几十到一两百字
+- 把摘要作为工具参数返回,不要用自然语言作答"""
+
+SUMMARY_PROMPT = ChatPromptTemplate.from_messages(
+    [("system", SUMMARY_SYSTEM),
+     ("human", "已有的梗概(只作背景,不要复述):{old_summary}\n\n要压成一段的这批对话:\n{dialog}")]
+)

@@ -38,5 +38,22 @@ class Settings(BaseSettings):
     intent_mode: str = "accuracy"     # accuracy=只用大模型;cost=小模型判→低置信升级大模型(未实现)
     intent_conf_threshold: float = 0.6  # cost 模式升级阈值(种子)
     summary_inject_segments: int = 3        # 注入时带最近几段摘要
+    summary_base_url: str = ""        # 空=回落 chat_base_url
+    summary_api_key: str = ""         # 空=回落 chat_api_key
+    context_window_max_tokens: int = 0    # 滑窗 token 上限。0=按 core/budget 的预算算,
+    summary_model: str = ""               # 摘要模型,空=回落 chat_model
+    model_context_window: int = 0           # 模型窗口。留 0 表示按 chat_model 名字查表(见 core/budget),
+    context_budget_turns: int = 20          # 预算按多少轮的最坏情况留;这个量以内的对话不会被裁掉
+    max_user_input_tokens: int = 2000       # X:单轮用户输入上限,约 1400 汉字
+    system_prompt_tokens: int = 700         # 实测:AGENT_SYSTEM 208 + 5 个内置工具 schema 476
+    evidence_tokens_per_chunk: int = 160    # 实测:answer 99 字 + 问法 10 + 标题路径 20,加编号格式
+    layer1_ratio: float = 0.7               # 层 1(原文)占滑窗预算的比例,其余归层 2
+    layer2_reply_keep_chars: int = 60       # 降到层 2 的客服答复留多少字,首句通常就是结论
+    layer2_tool_keep_tokens: int = 200      # 工具结果小于这个数就原样留,大块的压成一行
+    tool_result_max_tokens: int = 3000    # 单条工具结果回灌模型的硬上限,执行引擎按它截断。
+    agent_step_ai_tokens: int = 500       # ReAct 中间步 AI 消息的估值:tool_call 参数,
+    summary_tokens_per_segment: int = 250   # 每段摘要的估算体积,几十到两百字
+    budget_safety_margin: int = 1000        # 估算误差余量
+    zh_chars_per_token: float = 1.2
 
 settings = Settings()

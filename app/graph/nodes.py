@@ -1,3 +1,7 @@
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
 import json
 import logging
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -10,9 +14,6 @@ logger = logging.getLogger(__name__)
 
 def _user_text(state):
     return next((m.content for m in reversed(state.get('messages', [])) if isinstance(m, HumanMessage)), '')
-
-def _history_text(state, max_turns=6):
-    return '\n'.join((f'{m.type}:{m.content}' for m in state.get('messages', [])[:-1][-max_turns:]))
 
 async def main_agent(state, config=None):
     specs = await registry.get_all_specs()
@@ -176,10 +177,55 @@ async def agent_tools(state) -> dict:
         out['suggested_actions'] = actions
     return out
 from app.core.prompts import REFUND_JUDGE_HINT
+_KNOWLEDGE_EVIDENCE_HINT = '\n\n## 已检索到的知识证据(请据此作答,每个关键结论后标注来源编号如[1];证据已给,不要再调用 query_faq;仍可按需调用订单/物流等工具)\n型号编号逐字复制证据里的写法,证据里没有的型号不要写;带条件的结论要连条件一起说。\n'
+
+def _turn_context(state) -> str:
+    """本轮才有的材料:检索证据 + 退款路的订单数据。没有就返回空串。
+
+    顺序不能反:REFUND_JUDGE_HINT 的措辞是「下面给出该订单数据与检索到的退换货政策证据」,
+    它假设证据已在前文给过。"""
+    parts = []
+    if state.get('evidence'):
+        parts.append(_KNOWLEDGE_EVIDENCE_HINT + state['evidence'])
+    if state.get('route') == 'refund_flow':
+        parts.append(REFUND_JUDGE_HINT + json.dumps(state.get('order_data', {}), ensure_ascii=False))
+    return ''.join(parts)
+TURN_CTX_ID = 'turn-ctx'
+
+def _with_turn_context(window: list, turn_ctx: str) -> list:
+    """把本轮材料插在滑窗里最后一条用户消息之后。
+
+    插在这个位置而不是整个列表末尾,是为了 ReAct 轮内也能命中前缀缓存:第 2 步的
+    [Sys, 用户问, 材料, AI, Tool] 完整包含第 1 步的 [Sys, 用户问, 材料] 作前缀;
+    追加到末尾则第 2 步变成 [Sys, 用户问, AI, Tool, 材料],公共前缀只到用户问那条。
+    窗口里没有用户消息(极端裁剪回退分支)时退化成追加到末尾,不抛异常。"""
+    msg = HumanMessage(turn_ctx, id=TURN_CTX_ID)
+    for i in range(len(window) - 1, -1, -1):
+        if isinstance(window[i], HumanMessage):
+            return [*window[:i + 1], msg, *window[i + 1:]]
+    return [*window, msg]
+from app.core import memory
 # 来源：公众号@小林coding
 # 后端八股网站：xiaolincoding.com
 # Agent网站：xiaolinnote.com
 # 简历模版：jianli.xiaolinnote.com
+
+def _history_text(state, max_turns: int = 6) -> str:
+    """摘要行 + 滑窗内最近若干轮(不含本轮最后一条 human),供 coref/意图读上下文。
+    ch07:先按摘要边界切窗再取尾——跨滑窗的指代(「最开始那个订单」)靠摘要行兜住。"""
+    msgs = memory.build_window(state.get("messages", []),
+                               state.get("summary_upto_msg_id") or 0,
+                               state.get("layer1_from_msg_id") or 0)
+    prior = msgs[:-1] if msgs else []
+    lines = []
+    for m in prior[-max_turns:]:
+        role = "用户" if isinstance(m, HumanMessage) else "客服"
+        text = m.content if isinstance(m.content, str) else ""
+        if text:
+            lines.append(f"{role}:{text}")
+    body = "\n".join(lines)
+    head = memory.summary_line(state.get("summary"))
+    return f"{head}\n{body}".strip() if head else body
 
 _KNOWLEDGE_EVIDENCE_HINT = (
     "\n\n## 已检索到的知识证据(请据此作答,每个关键结论后标注来源编号如[1];"
@@ -193,6 +239,9 @@ def _turn_context(state) -> str:
     顺序不能反:REFUND_JUDGE_HINT 的措辞是「下面给出该订单数据与检索到的退换货政策证据」,
     它假设证据已在前文给过。"""
     parts = []
+    ss = memory.summary_system(state.get("summary"))
+    if ss is not None:
+        parts.append("\n\n" + ss.content)     # 摘要排最前:它讲的是更早发生的事
     if state.get("evidence"):
         parts.append(_KNOWLEDGE_EVIDENCE_HINT + state["evidence"])
     if state.get("route") == "refund_flow":
@@ -214,8 +263,42 @@ def _with_turn_context(window: list, turn_ctx: str) -> list:
             return [*window[:i + 1], msg, *window[i + 1:]]
     return [*window, msg]
 
-def _agent_messages(state):
-    window=list(state.get("messages",[]))
-    context=_turn_context(state)
-    if context:window=_with_turn_context(window,context)
-    return [SystemMessage(AGENT_SYSTEM),*window]
+def _agent_messages(state) -> list:
+    """拼装顺序固定(ch07):人设+红线 system → 滑窗原文 → 摘要与本轮材料(紧跟用户那句)。
+
+    整条消息列表里**只有一条 SystemMessage**,内容恒为 AGENT_SYSTEM。这不是洁癖:
+    上游的 chat template 会把列表里所有 system 消息上提、合并成一个头部块渲染,所以
+    「摘要单独放第二条 system」等于把它拼在了 AGENT_SYSTEM 后面,工具 schema 被挤到
+    可变内容之后 —— 而 prompt caching 按渲染后的前缀精确匹配,于是整段前缀全 miss。
+    实测:无摘要的会话 cache_read=2048,摘要一进 system 就掉到 0。
+    摘要因此跟证据一起走用户侧那条消息。
+
+    滑窗=两个锚点切三段(层 1 原文 / 层 2 半压 / 层 3 已进摘要不出现) + trim_messages
+    token 兜底;State 全量历史不动,这里只现拼精简版。"""
+    window = memory.build_window(state.get("messages", []),
+                                 state.get("summary_upto_msg_id") or 0,
+                                 state.get("layer1_from_msg_id") or 0)
+    turn_ctx = _turn_context(state)
+    if turn_ctx:
+        window = _with_turn_context(window, turn_ctx)
+    return [SystemMessage(AGENT_SYSTEM), *window]
+
+def _log_model_context(state, msgs) -> None:
+    """ch07 验收可观测:把实际发给模型的摘要与滑窗打进日志(log/app.log)。
+    摘要本就几十到两百字,打全文;滑窗每条打角色+前 40 字。"""
+    # 本轮材料块虽然也是 HumanMessage,但它不是用户说的话,从滑窗里摘出来单独报,
+    # 否则「window=N条」会凭空多一条,验收时读不准
+    ctx_block = next((m for m in msgs if getattr(m, "id", None) == TURN_CTX_ID), None)
+    window = [m for m in msgs
+              if not isinstance(m, SystemMessage) and getattr(m, "id", None) != TURN_CTX_ID]
+    lines = []
+    for m in window:
+        text = m.content if isinstance(m.content, str) else ""
+        lines.append(f"  [{m.type}] {text[:40]!r}")
+    logger.info(
+        "model_ctx conv=%s step=%s summary=%r window=%s条 本轮材料=%s tokens≈%s\n%s",
+        state.get("conversation_id"), state.get("steps", 0),
+        state.get("summary") or "(无)", len(window),
+        f"{len(ctx_block.content)}字" if ctx_block else "无",
+        memory.count_tokens(msgs), "\n".join(lines),
+    )

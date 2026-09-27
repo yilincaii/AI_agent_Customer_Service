@@ -18,6 +18,9 @@ def merge_dict(a: dict | None, b: dict | None) -> dict:
 
 class ConversationState(TypedDict, total=False):
     messages: Annotated[list[AnyMessage], add_messages]
+    summary: str
+    summary_upto_msg_id: int
+    layer1_from_msg_id: int
     user_id: str
     conversation_id: int
     intent: str
