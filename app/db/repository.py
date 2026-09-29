@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy import case, func, select, update
 import app.db.base as db
 from app.config import settings
-from app.db.models import Conversation, Message, Faq, Ticket, KnowledgeChunk, QaExtractionStaging, LowConfidenceQuestion, FaithCase, ConversationSummary
+from app.db.models import Conversation, Message, Faq, Ticket, KnowledgeChunk, QaExtractionStaging, LowConfidenceQuestion, FaithCase, ConversationSummary, ToolAuditLog
 
 # 来源：公众号@小林coding
 # 后端八股网站：xiaolincoding.com
@@ -377,6 +377,29 @@ async def list_conversations_with_messages() -> list[tuple[int, list[Message]]]:
             )
             out.append((cid, msgs))
         return out
+
+async def insert_tool_audit(
+    conversation_id: int | None,
+    tool_call_id: str | None,
+    tool_name: str,
+    tool_source: str,
+    mcp_server: str | None,
+    arguments: dict | None,
+    result_summary: str | None,
+    status: str,
+    error_message: str | None,
+    retry_count: int,
+    duration_ms: int | None,
+) -> None:
+    """工具调用审计落一条。调用方(engine)自行 try/except——审计失败不许反拦工具执行。"""
+    async with db.async_session() as s:
+        s.add(ToolAuditLog(
+            conversation_id=conversation_id, tool_call_id=tool_call_id,
+            tool_name=tool_name, tool_source=tool_source, mcp_server=mcp_server,
+            arguments=arguments, result_summary=result_summary, status=status,
+            error_message=error_message, retry_count=retry_count, duration_ms=duration_ms,
+        ))
+        await s.commit()
 
 async def upsert_faith_case(eval_id: str, bucket: str, query: str, answer: str, reason: str,
                             citations: list | None = None, strategy: str = "hybrid_rerank",

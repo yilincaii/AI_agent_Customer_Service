@@ -55,5 +55,9 @@ class Settings(BaseSettings):
     summary_tokens_per_segment: int = 250   # 每段摘要的估算体积,几十到两百字
     budget_safety_margin: int = 1000        # 估算误差余量
     zh_chars_per_token: float = 1.2
+    tool_default_timeout: float = 5.0    # 内置工具默认超时(秒)
+    mcp_tool_timeout: float = 10.0       # MCP 工具默认超时(走 HTTP,放宽)
+    tool_max_retries: int = 2            # 只读工具暂时性故障最大重试次数
+    demo_ticket_delay_seconds: float = 0.0  # 验收 6:>0 时 create_ticket 人为变慢(写超时演示)
 
 settings = Settings()
