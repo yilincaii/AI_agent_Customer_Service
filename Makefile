@@ -45,3 +45,6 @@ mcp-down:
 	-@kill `cat data/mcp-aftersales.pid 2>/dev/null` 2>/dev/null; rm -f data/mcp-aftersales.pid
 	@echo "MCP Servers 已停"
 
+
+eval-ch08:  ## ch08 验收样例端到端(需 make dev 全服务 + MCP Server 在跑 + 已应用 sql/ch08-ddl.sql)
+	uv run python -m scripts.eval_ch08

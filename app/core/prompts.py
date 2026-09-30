@@ -283,3 +283,8 @@ SUMMARY_PROMPT = ChatPromptTemplate.from_messages(
     [("system", SUMMARY_SYSTEM),
      ("human", "已有的梗概(只作背景,不要复述):{old_summary}\n\n要压成一段的这批对话:\n{dialog}")]
 )
+
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com

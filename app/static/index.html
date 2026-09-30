@@ -1002,8 +1002,52 @@
     }
 
     // ---------- ch08:工单预览确认卡(interrupt confirm_ticket → 确认提交/取消 → resume 续跑)----------
-    function renderTicketConfirm() {}
+    function renderTicketConfirm(bubble, preview) {
+      const intro = document.createElement("div");
+      intro.className = "bubble-text";
+      intro.textContent = "请确认工单信息:";
+      bubble.appendChild(intro);
+      const card = document.createElement("div");
+      card.className = "ticket-confirm";
+      card.innerHTML =
+        '<div class="tc-title">📋 工单预览</div>' +
+        '<div class="tc-row"><span class="tc-label">工单类型</span><span>' + escapeHtml(preview.ticket_type || "咨询") + "</span></div>" +
+        '<div class="tc-row"><span class="tc-label">问题描述</span><span>' + escapeHtml(preview.description || "") + "</span></div>";
+      const btns = document.createElement("div");
+      btns.className = "tc-btns";
+      const mk = (text, confirmed, extraClass) => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "action-btn" + (extraClass ? " " + extraClass : "");
+        btn.textContent = text;
+        btn.addEventListener("click", async () => {
+          btns.querySelectorAll("button").forEach((b) => (b.disabled = true));
+          card.classList.add("decided");
+          addRow("user").textContent = confirmed ? "确认提交工单" : "取消建单";
+          const nb = addRow("bot");
+          setBusy(true);
+          try {
+            await streamInto(nb, () => fetch("/api/actions/resume", {
+              method: "POST", headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ conversation_id: getConversationId(), confirmed }),
+            }));
+          } catch (e) {
+            nb.className = "bubble error";
+            nb.textContent = "续跑失败,请稍后重试";
+          } finally {
+            setBusy(false);
+          }
+        });
+        return btn;
+      };
+      btns.appendChild(mk("确认提交", true));
+      btns.appendChild(mk("取消", false, "tc-cancel"));
+      card.appendChild(btns);
+      bubble.appendChild(card);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
 
+    // 读一条 SSE 流,按帧分发到 on.{delta,tool,citations,actions,interrupt};done 存 conversation_id;event: error 抛错
     async function readSSEStream(resp, on) {
       if (!resp.ok || !resp.body) throw new Error("bad response");
       const reader = resp.body.getReader();
