@@ -1,7 +1,7 @@
 export PYTHONUTF8 = 1
 .PHONY: dev test
 dev:
-	uv run uvicorn app.main:app --port 8000
+	bash scripts/dev.sh
 test:
 	uv run pytest
 eval:
@@ -32,3 +32,16 @@ eval-workflow:
 	PYTHONPATH=. uv run python scripts/eval_ch06.py
 eval-context:
 	PYTHONPATH=. uv run python scripts/eval_ch07.py
+
+mcp-up:
+	@mkdir -p log data
+	@nohup uv run python mcp_servers/logistics_server.py  > log/mcp-logistics.log 2>&1 & echo $$! > data/mcp-logistics.pid
+	@nohup uv run python mcp_servers/aftersales_server.py > log/mcp-aftersales.log 2>&1 & echo $$! > data/mcp-aftersales.pid
+	@sleep 1 && echo "MCP Servers 已拉起: logistics=:8101 aftersales=:8102(pid 见 data/*.pid)"
+
+
+mcp-down:
+	-@kill `cat data/mcp-logistics.pid 2>/dev/null` 2>/dev/null; rm -f data/mcp-logistics.pid
+	-@kill `cat data/mcp-aftersales.pid 2>/dev/null` 2>/dev/null; rm -f data/mcp-aftersales.pid
+	@echo "MCP Servers 已停"
+

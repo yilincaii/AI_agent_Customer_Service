@@ -14,6 +14,8 @@ from app.graph import runtime
 @asynccontextmanager
 async def lifespan(app):
     _check_context_budget()
+    from app.tools.registry import scan_builtin
+    scan_builtin()
     await runtime.init_graph()
     try:yield
     finally:await runtime.close_graph()
