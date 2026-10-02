@@ -11,6 +11,7 @@ from app.config import settings
 from app.db import repository
 from app.graph.build import build_graph
 from app.core import summarizer,budget,memory
+from app.core.observability import attach_observability
 # 来源：公众号@小林coding
 # 后端八股网站：xiaolincoding.com
 # Agent网站：xiaolinnote.com
@@ -38,7 +39,7 @@ async def init_graph() -> None:
     checkpointer = await _cm.__aenter__()
     await checkpointer.setup()
     # ch09:编译时挂一次 Langfuse 回调,全图自动 trace(未配置时原样返回,零依赖)
-    _graph = build_graph(checkpointer=checkpointer)
+    _graph = attach_observability(build_graph(checkpointer=checkpointer))
     logger.info("图已编译,checkpointer=%s", settings.checkpointer_db_path)
 
 async def close_graph() -> None:

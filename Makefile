@@ -48,3 +48,20 @@ mcp-down:
 
 eval-ch08:  ## ch08 验收样例端到端(需 make dev 全服务 + MCP Server 在跑 + 已应用 sql/ch08-ddl.sql)
 	uv run python -m scripts.eval_ch08
+
+langfuse-up:
+	docker compose -p mewhelp-langfuse -f docker-compose.langfuse.yml up -d
+	@echo "Langfuse 起中: http://localhost:3000 (admin@mewhelp.local / mewhelp123)"
+	@echo "首次就绪约 2-3 分钟;key 已 headless 预置,写 .env:"
+	@echo "  LANGFUSE_PUBLIC_KEY=pk-lf-mewhelp-local"
+	@echo "  LANGFUSE_SECRET_KEY=sk-lf-mewhelp-local"
+	@echo "  LANGFUSE_BASE_URL=http://localhost:3000"
+
+
+langfuse-down:
+	docker compose -p mewhelp-langfuse -f docker-compose.langfuse.yml down
+
+
+cost-report:  ## ch09 按意图 token 账(需 Langfuse 在跑;DAYS=窗口天数)
+	PYTHONPATH=. uv run python scripts/cost_by_intent.py --days $(or $(DAYS),7)
+

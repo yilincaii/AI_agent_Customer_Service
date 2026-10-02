@@ -61,5 +61,8 @@ class Settings(BaseSettings):
     demo_ticket_delay_seconds: float = 0.0  # 验收 6:>0 时 create_ticket 人为变慢(写超时演示)
     mcp_logistics_url: str = "http://127.0.0.1:8101/mcp"    # 物流 MCP Server
     mcp_aftersales_url: str = "http://127.0.0.1:8102/mcp"   # 售后 MCP Server
+    langfuse_public_key: str = ""
+    langfuse_secret_key: str = ""
+    langfuse_base_url: str = ""     # 如 http://localhost:3000(自部署地址,数据不出门)
 
 settings = Settings()

@@ -97,6 +97,7 @@ async def classify_intent(state) -> dict:
     r = await intent_mod.classify(query, _history_text(state))
     intent, conf = (r['intent'], r['confidence'])
     route = INTENT_TO_ROUTE.get(intent, 'business')
+    tag_intent(intent, conf)
     return {'intent': intent, 'intent_confidence': conf, 'route': route, 'trace': {'intent': intent, 'intent_confidence': conf, 'route': route}}
 import re
 from langgraph.types import interrupt
@@ -291,3 +292,4 @@ def _log_model_context(state, msgs) -> None:
         text = m.content if isinstance(m.content, str) else ''
         lines.append(f'  [{m.type}] {text[:40]!r}')
     logger.info('model_ctx conv=%s step=%s summary=%r window=%s条 本轮材料=%s tokens≈%s\n%s', state.get('conversation_id'), state.get('steps', 0), state.get('summary') or '(无)', len(window), f'{len(ctx_block.content)}字' if ctx_block else '无', memory.count_tokens(msgs), '\n'.join(lines))
+from app.core.observability import tag_intent
