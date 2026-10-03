@@ -73,3 +73,15 @@ flywheel:  ## ch09 飞轮批处理:问题池 → 标准化查重 → 待审队�
 flywheel-samples:  ## ch09 标准化查重 prompt 标注样例验证(通过率 ≥ 80%)
 	PYTHONPATH=. uv run python scripts/validate_flywheel_samples.py
 
+
+calibrate-confidence:  ## ch09 置信度阈值校准(需 milvus + 上游可调通 + 知识库已建)
+	PYTHONPATH=. uv run python scripts/calibrate_confidence.py
+
+
+eval-flywheel:  ## ch09 评估流水线:复用 ch04 评估集,落 eval_runs 连趋势(TRIGGER=手动|定时)
+	PYTHONPATH=. uv run python scripts/eval_flywheel.py --triggered-by $(or $(TRIGGER),手动)
+
+
+seed-conv:
+	docker exec -i mewhelp-mysql mysql --default-character-set=utf8mb4 -uroot -proot mewhelp < sql/ch03-seed.sql
+

@@ -87,3 +87,10 @@ app.include_router(review_router)
 @app.get("/review")
 def review_page():
     return FileResponse(Path(__file__).parent / "static" / "review.html")
+
+from app.api.observability import router as observability_router
+app.include_router(observability_router)
+
+@app.get("/observability")
+def observability_page():
+    return FileResponse(Path(__file__).parent / "static" / "observability.html")
