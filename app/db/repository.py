@@ -6,7 +6,7 @@ from datetime import datetime
 from sqlalchemy import case, func, select, update
 import app.db.base as db
 from app.config import settings
-from app.db.models import Conversation, Message, Faq, Ticket, KnowledgeChunk, QaExtractionStaging, LowConfidenceQuestion, FaithCase, ConversationSummary, ToolAuditLog
+from app.db.models import Conversation, Message, Faq, Ticket, KnowledgeChunk, QaExtractionStaging, LowConfidenceQuestion, FaithCase, ConversationSummary, ToolAuditLog, ReviewQueue, EvalRun
 
 # 来源：公众号@小林coding
 # 后端八股网站：xiaolincoding.com
@@ -356,6 +356,7 @@ async def insert_low_confidence(
     async with db.async_session() as s:
         row = LowConfidenceQuestion(
             conversation_id=conversation_id, raw_question=raw_question,
+            source=source, reason=reason, retrieved_chunks=retrieved_chunks,
         )
         s.add(row)
         await s.commit()
@@ -377,6 +378,108 @@ async def list_conversations_with_messages() -> list[tuple[int, list[Message]]]:
             )
             out.append((cid, msgs))
         return out
+
+async def fetch_unmatched_low_conf(limit: int) -> list[LowConfidenceQuestion]:
+    """飞轮处理游标:尚未归并(matched_review_id IS NULL)的池内问题,按 id 升序。"""
+    async with db.async_session() as s:
+        result = await s.execute(
+            select(LowConfidenceQuestion)
+            .where(LowConfidenceQuestion.matched_review_id.is_(None))
+            .order_by(LowConfidenceQuestion.id).limit(limit)
+        )
+        return list(result.scalars())
+
+async def list_review_candidates(limit: int = 200) -> list[dict]:
+    """查重候选:全部状态的缺口行(用户拍板:比全部,驳回即终审),updated_at 倒序截断防 token 爆。"""
+    async with db.async_session() as s:
+        result = await s.execute(
+            select(ReviewQueue.id, ReviewQueue.normalized_question)
+            .order_by(ReviewQueue.updated_at.desc()).limit(limit)
+        )
+        return [{"id": r.id, "normalized_question": r.normalized_question} for r in result]
+
+async def insert_review_item(normalized_question: str, ai_suggested_answer: str | None) -> int:
+    async with db.async_session() as s:
+        row = ReviewQueue(normalized_question=normalized_question,
+                          ai_suggested_answer=ai_suggested_answer)
+        s.add(row)
+        await s.commit()
+        return row.id
+
+async def increment_occurrence(review_id: int) -> None:
+    """查重命中:只累加次数,状态不动(命中已驳回/已通过也一样——驳回即终审)。
+    原子 UPDATE,不走读改写,两批飞轮重叠时不丢计数。"""
+    async with db.async_session() as s:
+        await s.execute(
+            update(ReviewQueue)
+            .where(ReviewQueue.id == review_id)
+            .values(occurrence_count=ReviewQueue.occurrence_count + 1)
+        )
+        await s.commit()
+
+async def set_matched_review(lcq_id: int, review_id: int) -> None:
+    async with db.async_session() as s:
+        row = await s.get(LowConfidenceQuestion, lcq_id)
+        if row is not None:
+            row.matched_review_id = review_id
+            await s.commit()
+
+async def list_review_queue(status: str | None) -> list[ReviewQueue]:
+    """审核页列表:按出现次数降序(频次=优先级),同频新的在前。"""
+    async with db.async_session() as s:
+        q = select(ReviewQueue).order_by(
+            ReviewQueue.occurrence_count.desc(), ReviewQueue.id.desc())
+        if status:
+            q = q.where(ReviewQueue.review_status == status)
+        return list((await s.execute(q)).scalars())
+
+async def get_review_detail(review_id: int) -> tuple[ReviewQueue, list[LowConfidenceQuestion]] | None:
+    """详情:缺口行 + 归并进来的原话流水(带 source/快照,审核人判断真缺还是没检到)。"""
+    async with db.async_session() as s:
+        item = await s.get(ReviewQueue, review_id)
+        if item is None:
+            return None
+        raws = list((await s.execute(
+            select(LowConfidenceQuestion)
+            .where(LowConfidenceQuestion.matched_review_id == review_id)
+            .order_by(LowConfidenceQuestion.id)
+        )).scalars())
+        return item, raws
+
+async def update_review_status(review_id: int, status: str, approved_answer: str | None = None) -> bool:
+    """仅「待审」可流转(通过/驳回都是终态);返回是否真的更新了。"""
+    async with db.async_session() as s:
+        row = await s.get(ReviewQueue, review_id)
+        if row is None or row.review_status != "待审":
+            return False
+        row.review_status = status
+        if approved_answer is not None:
+            row.approved_answer = approved_answer
+        await s.commit()
+        return True
+
+async def delete_knowledge_chunks(ids: list[int]) -> None:
+    """审核写回失败的回滚:删掉本次插入的 pending chunk,防重试造出重复知识条目。"""
+    if not ids:
+        return
+    async with db.async_session() as s:
+        for i in ids:
+            row = await s.get(KnowledgeChunk, i)
+            if row is not None:
+                await s.delete(row)
+        await s.commit()
+
+async def insert_eval_run(triggered_by: str, dataset_size: int, metrics: dict) -> int:
+    async with db.async_session() as s:
+        row = EvalRun(triggered_by=triggered_by, dataset_size=dataset_size, metrics=metrics)
+        s.add(row)
+        await s.commit()
+        return row.id
+
+async def list_eval_runs(limit: int = 10) -> list[EvalRun]:
+    async with db.async_session() as s:
+        result = await s.execute(select(EvalRun).order_by(EvalRun.id.desc()).limit(limit))
+        return list(result.scalars())
 
 async def insert_tool_audit(
     conversation_id: int | None,
@@ -480,19 +583,3 @@ async def set_faith_case_status(case_id: int, status: str,
         await s.commit()
         await s.refresh(row)
         return row
-
-# 来源：公众号@小林coding
-# 后端八股网站：xiaolincoding.com
-# Agent网站：xiaolinnote.com
-# 简历模版：jianli.xiaolinnote.com
-
-async def delete_knowledge_chunks(ids: list[int]) -> None:
-    """审核写回失败的回滚:删掉本次插入的 pending chunk,防重试造出重复知识条目。"""
-    if not ids:
-        return
-    async with db.async_session() as s:
-        for i in ids:
-            row = await s.get(KnowledgeChunk, i)
-            if row is not None:
-                await s.delete(row)
-        await s.commit()

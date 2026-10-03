@@ -790,8 +790,51 @@
     }
 
     // ---------- ch04:每段回答满意度反馈(👍/👎,点一次点亮 + 已反馈,一次性)----------
-    function addFeedbackBar() {}
+    function addFeedbackBar(bubble) {
+      if (bubble.querySelector(".feedback")) return;   // 防重复挂
+      const bar = document.createElement("div");
+      bar.className = "feedback";
+      const up = document.createElement("button");
+      up.type = "button"; up.className = "fb-btn"; up.innerHTML = THUMB_UP_SVG;
+      up.setAttribute("aria-label", "这条回答有帮助");
+      const down = document.createElement("button");
+      down.type = "button"; down.className = "fb-btn"; down.innerHTML = THUMB_DOWN_SVG;
+      down.setAttribute("aria-label", "这条回答没帮助");
+      const done = document.createElement("span");
+      done.className = "fb-done"; done.hidden = true; done.textContent = "已反馈,谢谢~";
+      bar.append(up, down, done);
+      // ch09:向上找这条回答之前最近的用户气泡,把该轮用户原话带给后端(👎 落池要用)
+      function userQuestionBefore() {
+        let row = bubble.closest(".row");
+        while (row && (row = row.previousElementSibling)) {
+          if (row.classList && row.classList.contains("user")) {
+            const b = row.querySelector(".bubble");
+            return (b ? b.textContent : row.textContent).trim();
+          }
+        }
+        return "";
+      }
+      function give(chosen, other) {
+        if (bar.dataset.given) return;   // 一次性,点过不再变
+        bar.dataset.given = "1";
+        chosen.classList.add("active");  // 点亮选中的
+        other.classList.add("dim");      // 另一个淡出
+        up.disabled = true; down.disabled = true;
+        done.hidden = false;             // 显示"已反馈"
+        // ch09:反馈接后端——👎 落低置信度问题池进飞轮,👍 后端只记日志;失败静默,UI 行为不变
+        fetch("/api/feedback", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conversation_id: getConversationId(),
+                                 rating: chosen === down ? "down" : "up",
+                                 question: userQuestionBefore() }),
+        }).catch(() => {});
+      }
+      up.addEventListener("click", () => give(up, down));
+      down.addEventListener("click", () => give(down, up));
+      bubble.appendChild(bar);
+    }
 
+    // ---------- ch05:actions 帧 - 转人工/建工单两按钮交互 ----------
     function renderActions(bubble, items) {
       const bar = document.createElement("div");
       bar.className = "action-bar";

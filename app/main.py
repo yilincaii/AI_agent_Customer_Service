@@ -77,3 +77,13 @@ def _check_context_budget() -> None:
 
 import logging
 logger=logging.getLogger(__name__)
+
+from app.api.feedback import router as feedback_router
+app.include_router(feedback_router)
+
+from app.api.review import router as review_router
+app.include_router(review_router)
+
+@app.get("/review")
+def review_page():
+    return FileResponse(Path(__file__).parent / "static" / "review.html")

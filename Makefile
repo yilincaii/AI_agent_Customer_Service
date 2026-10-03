@@ -65,3 +65,11 @@ langfuse-down:
 cost-report:  ## ch09 按意图 token 账(需 Langfuse 在跑;DAYS=窗口天数)
 	PYTHONPATH=. uv run python scripts/cost_by_intent.py --days $(or $(DAYS),7)
 
+
+flywheel:  ## ch09 飞轮批处理:问题池 → 标准化查重 → 待审队列(需 mysql + 聊天上游)
+	PYTHONPATH=. uv run python scripts/flywheel_pipeline.py
+
+
+flywheel-samples:  ## ch09 标准化查重 prompt 标注样例验证(通过率 ≥ 80%)
+	PYTHONPATH=. uv run python scripts/validate_flywheel_samples.py
+

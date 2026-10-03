@@ -64,5 +64,6 @@ class Settings(BaseSettings):
     langfuse_public_key: str = ""
     langfuse_secret_key: str = ""
     langfuse_base_url: str = ""     # 如 http://localhost:3000(自部署地址,数据不出门)
+    evidence_confidence_threshold: float = 0.30
 
 settings = Settings()

@@ -29,9 +29,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
 
-_DDL_FILES = [pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch02-ddl.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch03-ddl.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch03-staging-review.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch04-ddl.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch07-ddl.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch07-layers.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch08-ddl.sql"]
+_DDL_FILES = [pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch02-ddl.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch03-ddl.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch03-staging-review.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch04-ddl.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch07-ddl.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch07-layers.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch08-ddl.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch09-ddl.sql"]
 
-_TABLES = ["conversation_summaries", "tool_audit_logs", "faith_cases", "low_confidence_questions", "messages", "tickets", "conversations", "faq", "qa_extraction_staging", "knowledge_chunks"]
+_TABLES = ["conversation_summaries", "tool_audit_logs", "review_queue", "eval_runs", "faith_cases", "low_confidence_questions", "messages", "tickets", "conversations", "faq", "qa_extraction_staging", "knowledge_chunks"]
 
 _TEST_URL = settings.test_database_url
 
