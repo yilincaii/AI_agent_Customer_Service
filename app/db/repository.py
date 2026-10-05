@@ -583,3 +583,23 @@ async def set_faith_case_status(case_id: int, status: str,
         await s.commit()
         await s.refresh(row)
         return row
+
+# 来源：公众号@小林coding
+# 后端八股网站：xiaolincoding.com
+# Agent网站：xiaolinnote.com
+# 简历模版：jianli.xiaolinnote.com
+
+def _pool_text_stmt():
+    """池问题取文本的公共查询:优先归并后的标准化问法,没归并退回原话。"""
+    return (
+        select(LowConfidenceQuestion.id, LowConfidenceQuestion.raw_question,
+               ReviewQueue.normalized_question)
+        .outerjoin(ReviewQueue, LowConfidenceQuestion.matched_review_id == ReviewQueue.id)
+        .order_by(LowConfidenceQuestion.id)
+    )
+
+async def list_pool_texts() -> list[dict]:
+    """ch10 训练语料捞取:全量低置信度问题。"""
+    async with db.async_session() as s:
+        rows = (await s.execute(_pool_text_stmt())).all()
+    return [{"question_id": qid, "text": norm or raw} for qid, raw, norm in rows]

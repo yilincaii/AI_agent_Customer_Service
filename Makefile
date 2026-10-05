@@ -85,3 +85,9 @@ eval-flywheel:  ## ch09 评估流水线:复用 ch04 评估集,落 eval_runs 连�
 seed-conv:
 	docker exec -i mewhelp-mysql mysql --default-character-set=utf8mb4 -uroot -proot mewhelp < sql/ch03-seed.sql
 
+ch10-golden:
+	PYTHONPATH=. uv run python scripts/ch10/validate_golden.py
+ch10-corpus:
+	PYTHONPATH=. uv run python scripts/ch10/build_corpus.py
+ch10-dataset:
+	PYTHONPATH=. uv run python scripts/ch10/build_dataset.py
