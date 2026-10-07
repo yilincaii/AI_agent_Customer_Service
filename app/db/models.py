@@ -2,14 +2,13 @@
 # 后端八股网站：xiaolincoding.com
 # Agent网站：xiaolinnote.com
 # 简历模版：jianli.xiaolinnote.com
-
 from datetime import datetime
 
 from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Integer, JSON, String, Text, func
-
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base
+
 
 class Conversation(Base):
     __tablename__ = "conversations"
@@ -27,6 +26,7 @@ class Conversation(Base):
         DateTime, server_default=func.now(), onupdate=func.now()
     )
 
+
 class ConversationSummary(Base):
     """分段摘要:一段一行,只追加。压完的段落不再回炉重压。"""
 
@@ -39,6 +39,7 @@ class ConversationSummary(Base):
     upto_msg_id: Mapped[int] = mapped_column(BigInteger)
     content: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
 
 class Message(Base):
     __tablename__ = "messages"
@@ -53,6 +54,7 @@ class Message(Base):
     tool_call_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
+
 class Faq(Base):
     __tablename__ = "faq"
 
@@ -64,6 +66,7 @@ class Faq(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, server_default=func.now(), onupdate=func.now()
     )
+
 
 class Ticket(Base):
     __tablename__ = "tickets"
@@ -78,6 +81,7 @@ class Ticket(Base):
         Enum("待处理", "已处理"), server_default="待处理"
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
 
 class KnowledgeChunk(Base):
     __tablename__ = "knowledge_chunks"
@@ -100,6 +104,7 @@ class KnowledgeChunk(Base):
         DateTime, server_default=func.now(), onupdate=func.now()
     )
 
+
 class QaExtractionStaging(Base):
     __tablename__ = "qa_extraction_staging"
 
@@ -114,6 +119,7 @@ class QaExtractionStaging(Base):
         server_default="extracted",
     )
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
 
 class ToolAuditLog(Base):
     __tablename__ = "tool_audit_logs"
@@ -132,6 +138,7 @@ class ToolAuditLog(Base):
     duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
 
+
 class LowConfidenceQuestion(Base):
     __tablename__ = "low_confidence_questions"
 
@@ -146,6 +153,7 @@ class LowConfidenceQuestion(Base):
     matched_review_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("review_queue.id"), nullable=True)               # ch09 查重归并落点
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
 
 class ReviewQueue(Base):
     """ch09 飞轮待审队列:一行 = 一个去重后的知识缺口;查重命中累加 occurrence_count 不新建行。"""
@@ -162,6 +170,7 @@ class ReviewQueue(Base):
         DateTime, server_default=func.now(), onupdate=func.now()
     )
 
+
 class EvalRun(Base):
     """ch09 自动化评估流水线:一行 = 一轮评估;metrics JSON 收各指标,按时间连成趋势。"""
     __tablename__ = "eval_runs"
@@ -171,6 +180,7 @@ class EvalRun(Base):
     dataset_size: Mapped[int] = mapped_column(Integer)
     metrics: Mapped[dict] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+
 
 class FaithCase(Base):
     """ch04 编造个案台账:一题一行,跨轮累计。
@@ -198,3 +208,14 @@ class FaithCase(Base):
     last_seen_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
     resolution: Mapped[str | None] = mapped_column(String(300), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class TopicClassification(Base):
+    """ch10 主题分类结果:旁路批量归类,一行 = 一条问题的一次归类;labels 存命中类目名数组。"""
+    __tablename__ = "topic_classifications"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    question_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("low_confidence_questions.id"))
+    labels: Mapped[list] = mapped_column(JSON)
+    classified_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())

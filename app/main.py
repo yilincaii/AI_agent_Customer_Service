@@ -94,3 +94,14 @@ app.include_router(observability_router)
 @app.get("/observability")
 def observability_page():
     return FileResponse(Path(__file__).parent / "static" / "observability.html")
+
+from app.api.topics import router as topics_router
+app.include_router(topics_router)
+
+@app.get("/topics")
+def topics_page():
+    return FileResponse(Path(__file__).parent / "static" / "topics.html")
+
+@app.get("/topics/questions")
+def topic_questions_page():
+    return FileResponse(Path(__file__).parent / "static" / "topic-questions.html")

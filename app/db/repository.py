@@ -3,22 +3,34 @@
 # Agent网站：xiaolinnote.com
 # 简历模版：jianli.xiaolinnote.com
 from datetime import datetime
-from sqlalchemy import case, func, select, update
-import app.db.base as db
-from app.config import settings
-from app.db.models import Conversation, Message, Faq, Ticket, KnowledgeChunk, QaExtractionStaging, LowConfidenceQuestion, FaithCase, ConversationSummary, ToolAuditLog, ReviewQueue, EvalRun
 
-# 来源：公众号@小林coding
-# 后端八股网站：xiaolincoding.com
-# Agent网站：xiaolinnote.com
-# 简历模版：jianli.xiaolinnote.com
+from sqlalchemy import case, func, select, update
+
+import app.db.base as db          # 用模块属性引用,便于测试 monkeypatch async_session
+from app.config import settings
+from app.db.models import (
+    Conversation,
+    ConversationSummary,
+    EvalRun,
+    FaithCase,
+    KnowledgeChunk,
+    LowConfidenceQuestion,
+    Message,
+    QaExtractionStaging,
+    ReviewQueue,
+    Ticket,
+    ToolAuditLog,
+    TopicClassification,
+)
 
 _TICKET_SEQ = 0
+
 
 def _gen_ticket_no() -> str:
     global _TICKET_SEQ
     _TICKET_SEQ += 1
     return f"T{datetime.now():%Y%m%d%H%M%S}{_TICKET_SEQ:03d}"
+
 
 async def create_conversation(user_id: str) -> int:
     async with db.async_session() as s:
@@ -27,9 +39,11 @@ async def create_conversation(user_id: str) -> int:
         await s.commit()
         return conv.id
 
+
 async def get_conversation(conversation_id: int) -> Conversation | None:
     async with db.async_session() as s:
         return await s.get(Conversation, conversation_id)
+
 
 async def append_message(
     conversation_id: int,
@@ -50,6 +64,7 @@ async def append_message(
         await s.commit()
         return msg.id
 
+
 async def list_messages(conversation_id: int) -> list[Message]:
     async with db.async_session() as s:
         result = await s.execute(
@@ -58,6 +73,7 @@ async def list_messages(conversation_id: int) -> list[Message]:
             .order_by(Message.id)
         )
         return list(result.scalars())
+
 
 async def create_ticket(conversation_id: int, description: str, ticket_type: str) -> str:
     ticket_no = _gen_ticket_no()
@@ -76,6 +92,10 @@ async def create_ticket(conversation_id: int, description: str, ticket_type: str
         await s.commit()
     return ticket_no
 
+
+# ---- ch07 会话上下文管理(滑窗 + 异步摘要)----
+
+
 async def count_messages_after(conversation_id: int, after_id: int | None) -> int:
     """距上次摘要新增了多少条(after_id 空 = 从未摘要,数全量)。摘要触发判据。
     注:此处数全角色,摘要源 list_dialog_messages 只取 user/assistant——当前一致
@@ -87,6 +107,7 @@ async def count_messages_after(conversation_id: int, after_id: int | None) -> in
             q = q.where(Message.id > after_id)
         return int((await s.execute(q)).scalar_one())
 
+
 async def list_dialog_messages(conversation_id: int) -> list[Message]:
     """user/assistant 消息按 id 升序(摘要任务源数据;tool 行不落库,过滤一道保险)。"""
     async with db.async_session() as s:
@@ -97,6 +118,7 @@ async def list_dialog_messages(conversation_id: int) -> list[Message]:
             .order_by(Message.id)
         )
         return list(result.scalars())
+
 
 async def list_conversations(user_id: str, limit: int = 50) -> list[dict]:
     """某用户的会话列表(新在前,带首问预览 + 有无摘要标记),前端多会话切换用。"""
@@ -120,6 +142,7 @@ async def list_conversations(user_id: str, limit: int = 50) -> list[dict]:
             })
         return out
 
+
 async def update_conversation_summary(conversation_id: int, summary: str, upto_msg_id: int) -> None:
     """摘要成功后原子更新两字段(一起写,不会出现摘要新边界旧)。"""
     async with db.async_session() as s:
@@ -129,6 +152,7 @@ async def update_conversation_summary(conversation_id: int, summary: str, upto_m
             conv.summary_upto_msg_id = upto_msg_id
             await s.commit()
 
+
 async def update_layer1_from(conversation_id: int, msg_id: int) -> None:
     """层 1 起点往后挪。只在超预算时挪一次,两次之间不动——边界稳,渲染才逐字节稳。"""
     async with db.async_session() as s:
@@ -136,6 +160,7 @@ async def update_layer1_from(conversation_id: int, msg_id: int) -> None:
         if conv is not None:
             conv.layer1_from_msg_id = msg_id
             await s.commit()
+
 
 async def append_summary_segment(conversation_id: int, from_msg_id: int,
                                  upto_msg_id: int, content: str) -> int:
@@ -163,6 +188,7 @@ async def append_summary_segment(conversation_id: int, from_msg_id: int,
         await s.commit()
         return seq
 
+
 async def list_summary_segments(conversation_id: int, limit: int | None = None) -> list[str]:
     """取最近几段,按时间正序返回。再老的梗概对当前问题基本没用,不必全带。"""
     n = settings.summary_inject_segments if limit is None else limit
@@ -174,6 +200,10 @@ async def list_summary_segments(conversation_id: int, limit: int | None = None) 
             .limit(n)
         )).scalars().all()
         return list(reversed(rows))
+
+
+# ---- ch03 知识库 chunk / 暂存表 ----
+
 
 async def insert_knowledge_chunk(
     category: str, questions: str, answer: str,
@@ -190,6 +220,7 @@ async def insert_knowledge_chunk(
         await s.commit()
         return row.id
 
+
 async def list_pending_chunks() -> list[KnowledgeChunk]:
     async with db.async_session() as s:
         result = await s.execute(
@@ -199,6 +230,7 @@ async def list_pending_chunks() -> list[KnowledgeChunk]:
         )
         return list(result.scalars())
 
+
 async def mark_chunk_vectorized(chunk_id: int, vector_id: str) -> None:
     async with db.async_session() as s:
         row = await s.get(KnowledgeChunk, chunk_id)
@@ -207,6 +239,7 @@ async def mark_chunk_vectorized(chunk_id: int, vector_id: str) -> None:
             row.vectorize_status = "done"
             await s.commit()
 
+
 async def set_chunk_neighbors(chunk_id: int, prev_id: int | None, next_id: int | None) -> None:
     async with db.async_session() as s:
         row = await s.get(KnowledgeChunk, chunk_id)
@@ -214,6 +247,7 @@ async def set_chunk_neighbors(chunk_id: int, prev_id: int | None, next_id: int |
             row.prev_chunk_id = prev_id
             row.next_chunk_id = next_id
             await s.commit()
+
 
 async def list_chunks_by_content_types(content_types) -> list[KnowledgeChunk]:
     """按 content_type 取块(文档类建库材料)。飞轮写回的块 content_type 不在这几类里,
@@ -225,6 +259,7 @@ async def list_chunks_by_content_types(content_types) -> list[KnowledgeChunk]:
             .order_by(KnowledgeChunk.id)
         )
         return list(result.scalars())
+
 
 async def repend_chunk_text(chunk_id: int, questions: str, answer: str) -> None:
     """改写一块的正文并退回 pending,等 vectorize_pending 重嵌。
@@ -240,6 +275,7 @@ async def repend_chunk_text(chunk_id: int, questions: str, answer: str) -> None:
             row.vectorize_status = "pending"
             await s.commit()
 
+
 async def count_chunks_by_status(status: str) -> int:
     async with db.async_session() as s:
         result = await s.execute(
@@ -248,10 +284,12 @@ async def count_chunks_by_status(status: str) -> int:
         )
         return int(result.scalar_one())
 
+
 async def list_all_questions() -> list[str]:
     async with db.async_session() as s:
         result = await s.execute(select(KnowledgeChunk.questions))
         return list(result.scalars())
+
 
 async def count_chunks_by_content_types(content_types) -> int:
     async with db.async_session() as s:
@@ -260,6 +298,7 @@ async def count_chunks_by_content_types(content_types) -> int:
             .where(KnowledgeChunk.content_type.in_(list(content_types)))
         )
         return int(result.scalar_one())
+
 
 async def knowledge_stats() -> dict:
     """知识库盘点:总块数 + 双写状态分布 + 内容类型分布 + 关键条款数。
@@ -279,12 +318,14 @@ async def knowledge_stats() -> dict:
             "done": by_status.get("done", 0), "by_content_type": by_type,
             "key_clause": int(key_clause)}
 
+
 async def list_recent_chunks(limit: int = 20) -> list[KnowledgeChunk]:
     async with db.async_session() as s:
         result = await s.execute(
             select(KnowledgeChunk).order_by(KnowledgeChunk.id.desc()).limit(limit)
         )
         return list(result.scalars())
+
 
 async def list_chunk_pairs() -> list[tuple[str, str]]:
     """全表的 (questions, answer) 对,给录入查重算指纹。
@@ -293,6 +334,7 @@ async def list_chunk_pairs() -> list[tuple[str, str]]:
     async with db.async_session() as s:
         result = await s.execute(select(KnowledgeChunk.questions, KnowledgeChunk.answer))
         return [(q, a) for q, a in result.all()]
+
 
 async def staging_stats() -> dict:
     """抽 QA 暂存表盘点:三个状态各几条 + 批次数 + 最近批次号。
@@ -310,6 +352,7 @@ async def staging_stats() -> dict:
                        for k in ("extracted", "kept", "discarded")},
             "total": sum(counts.values()), "batches": int(batches), "latest_batch": latest}
 
+
 async def insert_staging(batch_no: str, source_ref: str | None, question: str, answer: str) -> int:
     async with db.async_session() as s:
         row = QaExtractionStaging(
@@ -319,6 +362,7 @@ async def insert_staging(batch_no: str, source_ref: str | None, question: str, a
         await s.commit()
         return row.id
 
+
 async def list_staging_by_status(status: str) -> list[QaExtractionStaging]:
     async with db.async_session() as s:
         result = await s.execute(
@@ -327,6 +371,7 @@ async def list_staging_by_status(status: str) -> list[QaExtractionStaging]:
             .order_by(QaExtractionStaging.id)
         )
         return list(result.scalars())
+
 
 async def list_staging_by_ids(ids: list[int], status: str | None = None) -> list[QaExtractionStaging]:
     """按 id 取暂存行,可再限定状态。人工采纳/弃用时用它——限定 status='kept' 就能挡住
@@ -339,6 +384,7 @@ async def list_staging_by_ids(ids: list[int], status: str | None = None) -> list
             q = q.where(QaExtractionStaging.status == status)
         return list((await s.execute(q.order_by(QaExtractionStaging.id))).scalars())
 
+
 async def set_staging_status(ids: list[int], status: str) -> None:
     if not ids:
         return
@@ -348,6 +394,7 @@ async def set_staging_status(ids: list[int], status: str) -> None:
             if row is not None:
                 row.status = status
         await s.commit()
+
 
 async def insert_low_confidence(
     conversation_id: int | None, raw_question: str, source: str, reason: str | None,
@@ -362,6 +409,7 @@ async def insert_low_confidence(
         await s.commit()
         await s.refresh(row)
         return row.id
+
 
 async def list_conversations_with_messages() -> list[tuple[int, list[Message]]]:
     """挖知识用:每个会话及其按序消息(供拼成对话文本喂 LLM)。"""
@@ -379,6 +427,10 @@ async def list_conversations_with_messages() -> list[tuple[int, list[Message]]]:
             out.append((cid, msgs))
         return out
 
+
+# ---- ch09 数据飞轮(待审队列 + 评估轮次)----
+
+
 async def fetch_unmatched_low_conf(limit: int) -> list[LowConfidenceQuestion]:
     """飞轮处理游标:尚未归并(matched_review_id IS NULL)的池内问题,按 id 升序。"""
     async with db.async_session() as s:
@@ -389,6 +441,7 @@ async def fetch_unmatched_low_conf(limit: int) -> list[LowConfidenceQuestion]:
         )
         return list(result.scalars())
 
+
 async def list_review_candidates(limit: int = 200) -> list[dict]:
     """查重候选:全部状态的缺口行(用户拍板:比全部,驳回即终审),updated_at 倒序截断防 token 爆。"""
     async with db.async_session() as s:
@@ -398,6 +451,7 @@ async def list_review_candidates(limit: int = 200) -> list[dict]:
         )
         return [{"id": r.id, "normalized_question": r.normalized_question} for r in result]
 
+
 async def insert_review_item(normalized_question: str, ai_suggested_answer: str | None) -> int:
     async with db.async_session() as s:
         row = ReviewQueue(normalized_question=normalized_question,
@@ -405,6 +459,7 @@ async def insert_review_item(normalized_question: str, ai_suggested_answer: str 
         s.add(row)
         await s.commit()
         return row.id
+
 
 async def increment_occurrence(review_id: int) -> None:
     """查重命中:只累加次数,状态不动(命中已驳回/已通过也一样——驳回即终审)。
@@ -417,12 +472,14 @@ async def increment_occurrence(review_id: int) -> None:
         )
         await s.commit()
 
+
 async def set_matched_review(lcq_id: int, review_id: int) -> None:
     async with db.async_session() as s:
         row = await s.get(LowConfidenceQuestion, lcq_id)
         if row is not None:
             row.matched_review_id = review_id
             await s.commit()
+
 
 async def list_review_queue(status: str | None) -> list[ReviewQueue]:
     """审核页列表:按出现次数降序(频次=优先级),同频新的在前。"""
@@ -432,6 +489,7 @@ async def list_review_queue(status: str | None) -> list[ReviewQueue]:
         if status:
             q = q.where(ReviewQueue.review_status == status)
         return list((await s.execute(q)).scalars())
+
 
 async def get_review_detail(review_id: int) -> tuple[ReviewQueue, list[LowConfidenceQuestion]] | None:
     """详情:缺口行 + 归并进来的原话流水(带 source/快照,审核人判断真缺还是没检到)。"""
@@ -446,6 +504,7 @@ async def get_review_detail(review_id: int) -> tuple[ReviewQueue, list[LowConfid
         )).scalars())
         return item, raws
 
+
 async def update_review_status(review_id: int, status: str, approved_answer: str | None = None) -> bool:
     """仅「待审」可流转(通过/驳回都是终态);返回是否真的更新了。"""
     async with db.async_session() as s:
@@ -458,6 +517,7 @@ async def update_review_status(review_id: int, status: str, approved_answer: str
         await s.commit()
         return True
 
+
 async def delete_knowledge_chunks(ids: list[int]) -> None:
     """审核写回失败的回滚:删掉本次插入的 pending chunk,防重试造出重复知识条目。"""
     if not ids:
@@ -469,6 +529,7 @@ async def delete_knowledge_chunks(ids: list[int]) -> None:
                 await s.delete(row)
         await s.commit()
 
+
 async def insert_eval_run(triggered_by: str, dataset_size: int, metrics: dict) -> int:
     async with db.async_session() as s:
         row = EvalRun(triggered_by=triggered_by, dataset_size=dataset_size, metrics=metrics)
@@ -476,10 +537,15 @@ async def insert_eval_run(triggered_by: str, dataset_size: int, metrics: dict) -
         await s.commit()
         return row.id
 
+
 async def list_eval_runs(limit: int = 10) -> list[EvalRun]:
     async with db.async_session() as s:
         result = await s.execute(select(EvalRun).order_by(EvalRun.id.desc()).limit(limit))
         return list(result.scalars())
+
+
+# ---- ch08 工具审计 ----
+
 
 async def insert_tool_audit(
     conversation_id: int | None,
@@ -503,6 +569,127 @@ async def insert_tool_audit(
             error_message=error_message, retry_count=retry_count, duration_ms=duration_ms,
         ))
         await s.commit()
+
+
+# ---------- ch10 主题分类 ----------
+
+def _pool_text_stmt():
+    """池问题取文本的公共查询:优先归并后的标准化问法,没归并退回原话。"""
+    return (
+        select(LowConfidenceQuestion.id, LowConfidenceQuestion.raw_question,
+               ReviewQueue.normalized_question)
+        .outerjoin(ReviewQueue, LowConfidenceQuestion.matched_review_id == ReviewQueue.id)
+        .order_by(LowConfidenceQuestion.id)
+    )
+
+
+async def list_pool_texts() -> list[dict]:
+    """ch10 训练语料捞取:全量低置信度问题。"""
+    async with db.async_session() as s:
+        rows = (await s.execute(_pool_text_stmt())).all()
+    return [{"question_id": qid, "text": norm or raw} for qid, raw, norm in rows]
+
+
+async def list_unclassified_questions(limit: int = 500) -> list[dict]:
+    """ch10 旁路批处理捞取:尚未归类、且已归并的低置信度问题。
+    分类器只吃归并阶段产出的标准化问法;未归并(无 matched_review_id)的
+    不进分类,留到下一轮归并后再归——保证输入永远是语义完整的单句,不喂原话。"""
+    stmt = (
+        _pool_text_stmt()
+        .outerjoin(TopicClassification,
+                   TopicClassification.question_id == LowConfidenceQuestion.id)
+        .where(TopicClassification.id.is_(None))
+        .where(LowConfidenceQuestion.matched_review_id.is_not(None))
+        .limit(limit)
+    )
+    async with db.async_session() as s:
+        rows = (await s.execute(stmt)).all()
+    return [{"question_id": qid, "text": norm or raw} for qid, raw, norm in rows]
+
+
+async def insert_topic_classifications(rows: list[dict]) -> int:
+    """批量写归类结果;rows: [{question_id, labels}]。"""
+    async with db.async_session() as s:
+        s.add_all([TopicClassification(question_id=r["question_id"], labels=r["labels"])
+                   for r in rows])
+        await s.commit()
+    return len(rows)
+
+
+async def topic_distribution(samples_per_class: int = 3) -> dict:
+    """主题分布:17 类各自问题量 + 每类样例;labels JSON 在 Python 侧聚合(量级小)。"""
+    from app.core.taxonomy import TOPIC_NAMES
+
+    stmt = (
+        select(TopicClassification.labels, LowConfidenceQuestion.raw_question,
+               ReviewQueue.normalized_question, TopicClassification.classified_at)
+        .join(LowConfidenceQuestion,
+              TopicClassification.question_id == LowConfidenceQuestion.id)
+        .outerjoin(ReviewQueue, LowConfidenceQuestion.matched_review_id == ReviewQueue.id)
+    )
+    async with db.async_session() as s:
+        rows = (await s.execute(stmt)).all()
+    counts = {name: 0 for name in TOPIC_NAMES}
+    samples: dict[str, list[str]] = {name: [] for name in TOPIC_NAMES}
+    latest = None
+    for labels, raw, norm, ts in rows:
+        text = norm or raw
+        latest = ts if latest is None or ts > latest else latest
+        for lb in labels or []:
+            if lb in counts:
+                counts[lb] += 1
+                # 样例去重:归并后同一句标准化问法会对应池里好几行,三条样例都一样就白给了
+                if len(samples[lb]) < samples_per_class and text not in samples[lb]:
+                    samples[lb].append(text)
+    return {
+        "total": len(rows),
+        "latest": latest.isoformat() if latest else None,
+        "classes": [{"label": n, "count": counts[n], "samples": samples[n]}
+                    for n in TOPIC_NAMES],
+    }
+
+
+async def topic_questions(label: str, page: int = 1, size: int = 20) -> dict:
+    """某一类目下已归类的问题,分页。总数与分布页那张图同源,都是数 labels 命中。
+
+    labels 是 JSON 数组,筛选与分页都在 Python 侧做:归类总量是问题池规模(百级),
+    一次全捞不贵,换来的是不依赖 MySQL 的 JSON 函数,sqlite 上跑测试也一致。
+    """
+    stmt = (
+        select(TopicClassification.question_id, TopicClassification.labels,
+               TopicClassification.classified_at, LowConfidenceQuestion.raw_question,
+               LowConfidenceQuestion.source, LowConfidenceQuestion.created_at,
+               ReviewQueue.normalized_question, ReviewQueue.occurrence_count,
+               ReviewQueue.review_status)
+        .join(LowConfidenceQuestion,
+              TopicClassification.question_id == LowConfidenceQuestion.id)
+        .outerjoin(ReviewQueue, LowConfidenceQuestion.matched_review_id == ReviewQueue.id)
+        .order_by(TopicClassification.question_id.desc())
+    )
+    async with db.async_session() as s:
+        rows = (await s.execute(stmt)).all()
+
+    hit = [r for r in rows if label in (r[1] or [])]
+    size = max(1, min(size, 100))
+    pages = max(1, -(-len(hit) // size))
+    page = max(1, min(page, pages))
+    items = [
+        {"question_id": qid, "labels": labels,
+         "text": norm or raw, "raw_question": raw,
+         "normalized": norm is not None,
+         "source": source, "occurrence_count": occ,
+         "review_status": status,
+         "asked_at": asked.isoformat() if asked else None,
+         "classified_at": ts.isoformat() if ts else None}
+        for qid, labels, ts, raw, source, asked, norm, occ, status
+        in hit[(page - 1) * size: page * size]
+    ]
+    return {"label": label, "total": len(hit), "page": page, "size": size,
+            "pages": pages, "items": items}
+
+
+# ---- ch04 编造个案台账 ----
+
 
 async def upsert_faith_case(eval_id: str, bucket: str, query: str, answer: str, reason: str,
                             citations: list | None = None, strategy: str = "hybrid_rerank",
@@ -536,6 +723,7 @@ async def upsert_faith_case(eval_id: str, bucket: str, query: str, answer: str, 
         await s.commit()
         return row.id, reopened
 
+
 async def list_faith_cases(status: str | None = None, page: int = 1,
                            size: int = 5) -> tuple[list[FaithCase], int, dict]:
     """分页列表 + 三个状态各自的条数。未解决排前面,同状态内最近判出的排前面。"""
@@ -555,12 +743,14 @@ async def list_faith_cases(status: str | None = None, page: int = 1,
             .limit(size).offset(max(0, (page - 1) * size)))).scalars()
         return list(rows), total, counts
 
+
 async def faith_case_status_map() -> dict[str, str]:
     """eval_id → 处置状态。给幻觉率算「本轮」用:报告只给这一轮判出了哪几题,
     每题现在是什么处置得回台账查——台账是跨轮累计的,不能直接拿它的总数当本轮判出。"""
     async with db.async_session() as s:
         rows = (await s.execute(select(FaithCase.eval_id, FaithCase.status))).all()
         return {eid: st for eid, st in rows}
+
 
 async def set_faith_case_status(case_id: int, status: str,
                                 resolution: str | None = None) -> FaithCase | None:
@@ -583,23 +773,3 @@ async def set_faith_case_status(case_id: int, status: str,
         await s.commit()
         await s.refresh(row)
         return row
-
-# 来源：公众号@小林coding
-# 后端八股网站：xiaolincoding.com
-# Agent网站：xiaolinnote.com
-# 简历模版：jianli.xiaolinnote.com
-
-def _pool_text_stmt():
-    """池问题取文本的公共查询:优先归并后的标准化问法,没归并退回原话。"""
-    return (
-        select(LowConfidenceQuestion.id, LowConfidenceQuestion.raw_question,
-               ReviewQueue.normalized_question)
-        .outerjoin(ReviewQueue, LowConfidenceQuestion.matched_review_id == ReviewQueue.id)
-        .order_by(LowConfidenceQuestion.id)
-    )
-
-async def list_pool_texts() -> list[dict]:
-    """ch10 训练语料捞取:全量低置信度问题。"""
-    async with db.async_session() as s:
-        rows = (await s.execute(_pool_text_stmt())).all()
-    return [{"question_id": qid, "text": norm or raw} for qid, raw, norm in rows]

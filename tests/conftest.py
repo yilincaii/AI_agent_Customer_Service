@@ -1,43 +1,43 @@
-import os
-
-# Test-only placeholders; no real .env exists in this snapshot.
-for name, value in {
-    "CHAT_MODEL": "test-model", "CHAT_BASE_URL": "https://model.example/v1",
-    "CHAT_API_KEY": "test-placeholder", "CHAT_THINKING": "",
-    "CHAT_REASONING_EFFORT": "", "CHAT_REASONING_SPLIT": "",
-}.items():
-    os.environ[name] = value
-
 # 来源：公众号@小林coding
 # 后端八股网站：xiaolincoding.com
 # Agent网站：xiaolinnote.com
 # 简历模版：jianli.xiaolinnote.com
-
 import pathlib
 
 import pytest
-
 import pytest_asyncio
-
 from fastapi import FastAPI
-
 from fastapi.testclient import TestClient
-
 from sqlalchemy import text
-
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.config import settings
 
-_DDL_FILES = [pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch02-ddl.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch03-ddl.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch03-staging-review.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch04-ddl.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch07-ddl.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch07-layers.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch08-ddl.sql", pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch09-ddl.sql"]
-
-_TABLES = ["conversation_summaries", "tool_audit_logs", "review_queue", "eval_runs", "faith_cases", "low_confidence_questions", "messages", "tickets", "conversations", "faq", "qa_extraction_staging", "knowledge_chunks"]
+_DDL_FILES = [
+    pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch02-ddl.sql",
+    pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch03-ddl.sql",
+    # 挖知识加人工闸:给 qa_extraction_staging 的 status 补 approved/rejected 两个终态
+    pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch03-staging-review.sql",
+    pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch04-ddl.sql",
+    pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch07-ddl.sql",
+    # 分层上下文:conversations 加层1 锚点 + 分段摘要表
+    pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch07-layers.sql",
+    pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch08-ddl.sql",
+    pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch09-ddl.sql",
+    pathlib.Path(__file__).resolve().parent.parent / "sql" / "ch10-ddl.sql",
+]
+# 删除顺序:先子表后父表;knowledge_chunks 自引用 FK 靠 FOREIGN_KEY_CHECKS=0 兜
+# ch09:low_confidence_questions 有 FK 指向 review_queue,排它前面
+# ch10:topic_classifications 有 FK 指向 low_confidence_questions,必须排它前面先删
+_TABLES = ["faith_cases", "topic_classifications", "low_confidence_questions", "review_queue", "eval_runs",
+           "conversation_summaries",
+           "messages", "tickets", "tool_audit_logs", "conversations", "faq",
+           "qa_extraction_staging", "knowledge_chunks"]
 
 _TEST_URL = settings.test_database_url
-
 _DB_NAME = _TEST_URL.rsplit("/", 1)[1]
-
 _SERVER_URL = _TEST_URL.rsplit("/", 1)[0]
+
 
 def _split_sql(sql: str) -> list[str]:
     """按分号切语句,但跳过单引号字符串内的分号(ch09 起 COMMENT 文案里出现 ; 和 :)。"""
@@ -52,6 +52,7 @@ def _split_sql(sql: str) -> list[str]:
             buf.append(ch)
     stmts.append("".join(buf))
     return stmts
+
 
 def _create_table_stmts() -> list[str]:
     # 先去掉整行注释(-- ...),否则注释里的分号会把语句切错
@@ -70,6 +71,15 @@ def _create_table_stmts() -> list[str]:
                 # 切分保险:语句含 CREATE/ALTER 却不以其开头 = 字符串内分号/引号切错,炸响别静默
                 raise ValueError(f"DDL 切分异常({ddl.name}): {s[:80]!r}")
     return stmts
+
+
+@pytest.fixture(autouse=True)
+def _no_langfuse(monkeypatch):
+    """ch09:测试一律关闭 Langfuse——.env 若配了三变量,graph 测试里的 tag_intent
+    会把意图事件真发到本地 Langfuse(0-token 垃圾 trace 污染成本账,实测踩坑)。
+    test_observability 里要开的用例自行 monkeypatch 覆盖,不受影响。"""
+    monkeypatch.setattr("app.config.settings.langfuse_public_key", "")
+
 
 @pytest_asyncio.fixture()
 async def _test_engine():
@@ -94,6 +104,7 @@ async def _test_engine():
     yield engine
     await engine.dispose()
 
+
 @pytest_asyncio.fixture()
 async def db_session_factory(_test_engine, monkeypatch):
     """把 app.db.base.async_session 指向测试库,并返回该工厂供测试直接开 session。
@@ -105,15 +116,17 @@ async def db_session_factory(_test_engine, monkeypatch):
     monkeypatch.setattr("app.db.base.async_session", factory)
     return factory
 
+
 @pytest_asyncio.fixture()
 async def db_clean():
     """占位:表由 _test_engine 每个测试重建,无需额外清理。保留以兼容测试签名。"""
     yield
 
+
 @pytest.fixture()
 def client():
-    from fastapi import FastAPI
-    from fastapi.testclient import TestClient
-    from app.api.actions import router
-    app=FastAPI();app.include_router(router)
-    return TestClient(app)
+    """返回 FastAPI TestClient 用于 API 测试(包含 actions 路由)。"""
+    from app.api.actions import router as actions_router
+    test_app = FastAPI()
+    test_app.include_router(actions_router)
+    return TestClient(test_app)
