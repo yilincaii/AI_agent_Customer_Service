@@ -91,3 +91,7 @@ ch10-corpus:
 	PYTHONPATH=. uv run python scripts/ch10/build_corpus.py
 ch10-dataset:
 	PYTHONPATH=. uv run python scripts/ch10/build_dataset.py
+ch10-train:
+	PYTHONPATH=. uv run --group ml python scripts/ch10/train.py
+ch10-eval:
+	PYTHONPATH=. uv run --group ml python scripts/ch10/evaluate.py
