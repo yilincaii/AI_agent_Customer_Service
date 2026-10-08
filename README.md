@@ -1,81 +1,121 @@
-> 这份源码是一个 git 仓库，按章节分了分支。当前 `main` 是最终完整代码，
-> `git checkout ch01` … `git checkout ch09` 可以看每一章当时有哪些文件。
-> 早期分支只供对照阅读，里面会有指向后续章节的 import，不保证能直接运行。
+# MeowDesk
 
-# MewHelp — 电商智能客服 Agent
+I built MeowDesk as a customer service assistant for an online store. It answers questions about products and store policies, looks up orders and delivery information, and guides users through refund requests or creating a support ticket. I wanted it to check stored information and call tools when needed, rather than answer everything from the model alone.
 
-《AI Agent 智能客服实战》的配套源码。一个能查订单物流、答政策 FAQ、走退款子流程、
-挖知识补库、还能微调一个主题分类器的完整客服系统。
+The application has a streaming chat interface and an admin interface for maintaining the knowledge base, reviewing unanswered questions, checking retrieval results, and tracking model usage. Conversations are saved, and users can resume a request after confirming an action.
 
-代码是随课程一章章长出来的，不分支：ch01 一个纯对话接口起步，到 ch10 收尾时是下面这套东西。
+## Stack
 
-## 技术栈
+| Part | What I use |
+|---|---|
+| Backend | Python 3.12+, FastAPI, Uvicorn |
+| Agent workflow | LangGraph, LangChain, MCP |
+| Storage | MySQL with SQLAlchemy; SQLite for workflow checkpoints |
+| Search | Milvus Standalone, vector search, BM25, reranking |
+| Models | An OpenAI-compatible chat API; embedding and reranking APIs |
+| Interface | HTML, CSS, JavaScript |
+| Optional tools | Langfuse for tracing; PyTorch, Transformers and ONNX for topic classification |
+| Development | uv, Docker Compose, pytest |
 
-FastAPI + LangGraph / LangChain + SQLAlchemy / MySQL + Milvus。
+The default embedding model is `BAAI/bge-m3`, and the default reranker is `BAAI/bge-reranker-v2-m3`. Their API addresses default to SiliconFlow. The reranking endpoint uses a separate `/rerank` interface; an OpenAI-compatible chat endpoint alone is not enough.
 
-聊天、嵌入、重排三组上游各自直连，没有网关那一层。模型名和地址都在 `.env` 里配
-(`CHAT_*` / `EMBED_*` / `RERANK_*` 三组)，换供应商、换模型不用改代码。
+## Run locally
 
-## 跑起来
+Use macOS or Linux with Python 3.12+, uv, Docker Compose, Bash and make. On Windows, use WSL2. Docker needs to be running before starting the application.
+
+From the repository root:
 
 ```bash
-cp .env.example .env      # 填 CHAT_* / EMBED_* / RERANK_* 三组
-docker compose up -d      # MySQL
-make seed                 # 灌业务测试数据
-make dev                  # 依赖容器 + MCP :8101/:8102 + 应用 :8000
+uv sync --python 3.12
+cp .env.example .env
 ```
 
-浏览器打开 <http://localhost:8000> 就是聊天页。
+Edit `.env` and replace the placeholders. The required model settings are:
 
-**详细的安装、配置、建知识库、常见问题，看飞书那篇「MewHelp 项目源码下载」**，
-这里只留一条能把服务拉起来的最短路径。两边写岔了以那篇为准。
+```dotenv
+CHAT_BASE_URL=your-chat-api-base-url
+CHAT_MODEL=your-provider-model-name
+CHAT_API_KEY=your-chat-api-key
+EMBED_API_KEY=your-embedding-api-key
+RERANK_API_KEY=your-reranking-api-key
+```
 
-## 代码怎么组织
+Use a chat model that supports tool calling and structured output. Check the model-specific thinking settings in `.env.example`; they should match the provider you choose. If the model is not covered by the built-in context budget settings, set `MODEL_CONTEXT_WINDOW` to its documented token limit.
 
-| 位置 | 装的是什么 |
-| - | - |
-| `app/api/` | HTTP 入口。聊天、Agent、知识库录入、复核、验收页、成本看板 |
-| `app/graph/` | LangGraph 那张图。`state` 状态、`nodes` 节点、`routing` 分流规则、`build` 组装 |
-| `app/core/` | 单点能力。上游客户端、检索、重排、意图、指代、摘要、置信度、飞轮、可观测 |
-| `app/kb/` | 知识怎么进库。切块、嵌入、双写 MySQL 与 Milvus、去重、从对话里挖问答对 |
-| `app/tools/` | 工具系统。内置 `@tool`、MCP 客户端、注册表、统一执行引擎 |
-| `app/db/` | 表模型与仓储 |
-| `app/static/` | 前端页面。聊天、知识库录入、飞轮待审、观测与成本、主题分布、分类器验收 |
-| `mcp_servers/` | 两台业务 MCP Server，物流和售后各一台，独立进程 |
-| `sql/` | 各章的建表与迁移，容器首启按文件名顺序自动执行 |
-| `scripts/` | 建库、评估、微调这些离线活 |
-| `docs/superpowers/` | 各章的 spec 和 plan。课程实战篇教的就是这套流程，留着当范本 |
-| `primer/` | 前置篇两篇的配套例子（大模型是什么、Agent 怎么动起来），各自独立，跟项目其他代码没有依赖关系，`.env` 用同一份 |
+Set `DATABASE_URL` explicitly. For the unchanged local Docker configuration, these development values match the bundled MySQL container:
 
-## 各章长出了什么，怎么验
+```dotenv
+DATABASE_URL=mysql+asyncmy://root:root@127.0.0.1:3306/mewhelp
+TEST_DATABASE_URL=mysql+asyncmy://root:root@127.0.0.1:3306/mewhelp_test
+```
 
-`make test` 跑全部单测，不打真实模型。下面这些要真服务在跑。
+These are local development credentials. Keep `.env` out of Git. Intent recognition and conversation summaries use the chat model by default; separate `INTENT_*` and `SUMMARY_*` settings are optional. Langfuse is also optional.
 
-| 章 | 这一章长出来的东西 | 验收 |
-| - | - | - |
-| ch01 | 流式对话、结构化提取 | `make eval` |
-| ch02 | 五个 `@tool` 业务工具，单轮 Function Calling | `make eval-agent` |
-| ch03 | 切块、嵌入、MySQL 与 Milvus 双写、对话挖知识 | `make kb-build` `make kb-vectorize` `make eval-retrieval` |
-| ch04 | 混合检索、RRF、重排、Query 改写、四策略评估 | `make smoke-rag` `make eval-rag` |
-| ch05 | LangGraph workflow 骨架 + 主力 Agent 的 ReAct 环 | `make eval-ch05` |
-| ch06 | 分流器、指代消解、退款子流程的 interrupt/resume | `make smoke-interrupt` `make eval-ch06` |
-| ch07 | 上下文管理。滑窗、摘要、前缀缓存 | `make eval-ch07` |
-| ch08 | 工具系统。MCP 动态发现、统一执行引擎、审计日志 | `make eval-ch08` |
-| ch09 | Langfuse 自部署、数据飞轮、成本账 | `make langfuse-up` `make flywheel` `make eval-flywheel` `make cost-report` |
-| ch10 | 主题分类器。语料、微调、阈值扫描、ONNX 推理服务 | `make ch10-corpus` `make ch10-train` `make ch10-eval` |
+Start the database and search services:
 
-每条命令的前置条件（哪些服务得先起、哪张表得先建）写在飞书那篇文档的「各章验收」段里。
-`make help` 也能看到带说明的完整目标清单。
+```bash
+docker compose up -d
+docker compose ps
+```
 
-## 端口
+Wait for the services to become healthy. MySQL runs the files in `sql/` when its data volume is first created; restarting an existing volume does not rerun those files.
 
-| 端口 | 是什么 |
-| - | - |
-| 8000 | 应用 |
-| 8101 / 8102 | 业务 MCP Server，物流 / 售后 |
-| 8110 | ch10 主题分类器推理服务（`make classifier-up` 之后） |
-| 3000 | Langfuse（`make langfuse-up` 之后） |
-| 19530 | Milvus |
+Build and vectorize the bundled knowledge documents:
 
-应用那几个页面：`/` 聊天、`/kb` 知识库录入、`/review` 飞轮待审、`/observability` 观测与成本、
-`/topics` 主题分布、`/acceptance` 分类器验收。
+```bash
+make kb-build
+make kb-vectorize
+```
+
+Vectorization needs a working embedding API. Then start the application:
+
+```bash
+make dev
+```
+
+This checks the Docker services, starts the two local MCP servers, and runs FastAPI. Open:
+
+```text
+http://localhost:8000
+```
+
+The admin interface is at `/admin`, and the API documentation is at `/docs`.
+
+For deployment, I would start with a single application process on a Linux host and persistent database volumes. The repository does not include a complete production deployment configuration. Before exposing it publicly, add authentication, HTTPS and restricted access to the database, search service and admin endpoints.
+
+## Directories
+
+```text
+app/          API routes, agent workflow, retrieval, database access and web pages
+mcp_servers/  Local logistics and after-sales tool servers
+data/         Knowledge documents, classification data and generated runtime files
+scripts/      Knowledge ingestion, evaluation, calibration and model utilities
+sql/          Database schema and seed data
+tests/        Unit, API and integration tests
+docs/         Design and implementation notes
+primer/       Small standalone integration prototypes
+```
+
+## Tests
+
+With `.env` configured and MySQL and Milvus running:
+
+```bash
+uv run pytest -q
+```
+
+Use a separate database in `TEST_DATABASE_URL`. The database fixtures create it if needed and drop and recreate its tables. The full suite includes service integration tests, so it needs more than Python dependencies alone.
+
+Topic model training and export use the optional dependency group:
+
+```bash
+uv sync --group ml
+```
+
+The classifier also needs trained or exported model files. Those files are not included in the repository and are not required for the basic chat application.
+
+## Data and limits
+
+I use bundled Chinese customer support text for classification experiments: a 34-record internal dataset and a 2,916-record external dataset. The external dataset’s upstream source and license are not documented here.
+
+Order, product and logistics tools currently use mock data rather than a live store connection. The assistant can still misunderstand a request or retrieve weak evidence, so uncertain answers and consequential actions need review. Model calls depend on external services and may incur charges.
