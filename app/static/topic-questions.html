@@ -61,7 +61,7 @@
   </div>
 
   <div id="toast"></div>
-  
+  <script src="/static/admin.js"></script>
   <script src="/static/acceptance.js"></script>
   <script>
     /* 类目与页码都在地址栏里(?label=…&page=…):这一页是可以贴给别人的链接,
@@ -185,7 +185,7 @@
     }
 
     $("refreshBtn").onclick = load;
-
+    mountAdminNav("/topics");
     renderPicker(curLabel());
     load();
   </script>

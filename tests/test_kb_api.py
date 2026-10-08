@@ -158,6 +158,7 @@ async def test_录入页给得出补丁式重嵌这条作业(client):
     assert "kb-repatch" in jobs
     assert jobs["kb-repatch"]["cmd"] == "make kb-repatch"      # 页面按的就是终端那条命令
     assert not jobs["kb-repatch"].get("heavy")                 # 秒级,不该弹二次确认
+    assert jobs["kb-reset"]["heavy"] is True                   # 清库才是重活
 
 
 async def test_挖出来的条目要人点采纳才进知识库(client, monkeypatch):

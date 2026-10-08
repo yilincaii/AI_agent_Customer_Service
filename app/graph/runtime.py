@@ -4,33 +4,35 @@
 # 简历模版：jianli.xiaolinnote.com
 import logging
 from collections.abc import AsyncIterator
+
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
+
 from app.config import settings
+from app.core import summarizer
+from app.core.observability import attach_observability
+from app.config import settings
+from app.core import budget, memory
 from app.db import repository
 from app.graph.build import build_graph
-from app.core import summarizer,budget,memory
-from app.core.observability import attach_observability
-# 来源：公众号@小林coding
-# 后端八股网站：xiaolincoding.com
-# Agent网站：xiaolinnote.com
-# 简历模版：jianli.xiaolinnote.com
 
 logger = logging.getLogger(__name__)
 
+# 会流式吐答复 token 的节点(其余节点的模型调用 token 不进 delta)
 ANSWER_NODES = {"main_agent"}
-
+# 确定性节点把答复写在 state['answer'],整块作为 delta 吐出
 DETERMINISTIC_ANSWER_NODES = {"script_reply", "complaint_reply", "fallback_reply"}
-
+# 产出编号引用的检索节点(知识路 retrieve_knowledge + 退款政策路 retrieve_policy)
 CITATION_NODES = {"retrieve_knowledge", "retrieve_policy"}
 
 _graph = None
-
 _cm = None  # AsyncSqliteSaver context manager,持有以免被 GC
+
 
 class ConversationNotFound(Exception):
     pass
+
 
 async def init_graph() -> None:
     """lifespan 起:开持久 checkpointer + setup + 编译图。"""
@@ -42,6 +44,7 @@ async def init_graph() -> None:
     _graph = attach_observability(build_graph(checkpointer=checkpointer))
     logger.info("图已编译,checkpointer=%s", settings.checkpointer_db_path)
 
+
 async def close_graph() -> None:
     global _graph, _cm
     if _cm is not None:
@@ -49,10 +52,12 @@ async def close_graph() -> None:
         _cm = None
     _graph = None
 
+
 def get_graph():
     if _graph is None:
         raise RuntimeError("图未初始化,应在 FastAPI lifespan 调 init_graph()")
     return _graph
+
 
 async def get_turn_snapshot(conversation_id: int) -> dict:
     """👎 快照尽力回捞(ch09):读该会话 checkpointer 终态,返回最近一轮的用户问题与召回快照。
@@ -67,6 +72,7 @@ async def get_turn_snapshot(conversation_id: int) -> dict:
             break
     return {"question": question, "snapshot": values.get("retrieved_snapshot") or []}
 
+
 def dedup_actions(actions: list) -> list:
     """跨多个 ReAct 轮次累积的 suggested_actions 可能重复(如 agent 多次提议
     create_ticket);按 type 去重,保留每种 type 首次出现的那条。"""
@@ -80,6 +86,7 @@ def dedup_actions(actions: list) -> list:
         out.append(action)
     return out
 
+
 async def _ensure_conversation(user_id: str,
                                conversation_id: int | None) -> tuple[int, str, int, int]:
     """返回 (cid, summary, summary_upto_msg_id, layer1_from_msg_id):
@@ -91,6 +98,7 @@ async def _ensure_conversation(user_id: str,
         raise ConversationNotFound(conversation_id)
     return (conversation_id, conv.summary or "",
             conv.summary_upto_msg_id or 0, conv.layer1_from_msg_id or 0)
+
 
 def _graph_input(user_id: str, message: str, cid: int, msg_id: int,
                  summary: str, summary_upto: int, layer1_from: int = 0) -> dict:
@@ -109,6 +117,7 @@ def _graph_input(user_id: str, message: str, cid: int, msg_id: int,
             "layer1_from_msg_id": layer1_from,
             "trace": None}  # merge 通道:None=重置哨兵(见 merge_dict),清上一轮 trace 残留
 
+
 def _interrupt_payload(state: dict):
     """从终态提取中断负载(整个 __interrupt__[0].value:含 type + orders/preview 等);
     无中断返回 None。ch08 起中断不止订单选择器,负载透传、消费方按 type 分发。"""
@@ -117,10 +126,12 @@ def _interrupt_payload(state: dict):
         return None
     return intr[0].value
 
+
 async def _final_state(cid: int) -> dict:
     """流式跑完后从 checkpointer 取终态。astream 不返回终态,分层判断要靠它。"""
     snap = await get_graph().aget_state({"configurable": {"thread_id": str(cid)}})
     return snap.values if snap else {}
+
 
 async def settle_layers(cid: int, state: dict | None,
                         summary_upto: int, layer1_from: int) -> None:
@@ -149,6 +160,7 @@ async def settle_layers(cid: int, state: dict | None,
     except Exception:
         logger.exception("分层结算失败 conv=%s(不影响本轮回复)", cid)
 
+
 async def run_turn(user_id, message, conversation_id) -> dict:
     """非流式:落 user 消息 → ainvoke → 返回终态(供 /api/agent、eval)。遇 interrupt 带 orders。"""
     cid, summary, upto, layer1 = await _ensure_conversation(user_id, conversation_id)
@@ -162,6 +174,7 @@ async def run_turn(user_id, message, conversation_id) -> dict:
     await summarizer.maybe_schedule_summary(cid)   # ch07 轮后触发检查(后台跑,不阻塞返回)
     return {"conversation_id": cid, "state": final, "interrupt": _interrupt_payload(final)}
 
+
 async def resume_turn(conversation_id: int, resume_value) -> dict:
     """非流式续跑(供 /api/agent、eval):Command(resume) 回填后跑到下一个中断或结束。"""
     if await repository.get_conversation(conversation_id) is None:
@@ -172,6 +185,7 @@ async def resume_turn(conversation_id: int, resume_value) -> dict:
     await summarizer.maybe_schedule_summary(conversation_id)
     return {"conversation_id": conversation_id, "state": final,
             "interrupt": _interrupt_payload(final)}
+
 
 async def _stream_events(cid: int, stream_source) -> AsyncIterator[dict]:
     """astream 多模式 → 事件 dict。stream_source 为 _graph_input(...)(新一轮)或 Command(resume=...)(续跑)。
@@ -221,6 +235,7 @@ async def _stream_events(cid: int, stream_source) -> AsyncIterator[dict]:
         yield {"type": "actions", "items": dedup_actions(actions)}
     yield {"type": "done", "conversation_id": cid}
 
+
 async def stream_turn(user_id, message, conversation_id) -> AsyncIterator[dict]:
     """流式:落 user 消息 → astream 多模式 → 事件 dict(供 /api/chat 转 SSE)。"""
     cid, summary, upto, layer1 = await _ensure_conversation(user_id, conversation_id)
@@ -230,6 +245,7 @@ async def stream_turn(user_id, message, conversation_id) -> AsyncIterator[dict]:
         yield ev
     await settle_layers(cid, None, upto, layer1)   # 流式拿不到终态,内部自取
     await summarizer.maybe_schedule_summary(cid)   # ch07 流吐完再触发(后台跑,不阻塞)
+
 
 async def stream_resume(conversation_id: int, resume_value) -> AsyncIterator[dict]:
     """前端点选订单后续跑同一会话的暂停流(Command(resume) 续 astream,事件与 stream_turn 同构)。"""

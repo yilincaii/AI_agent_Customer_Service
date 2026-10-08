@@ -215,7 +215,7 @@
   </div>
 
   <div id="toast"></div>
-  
+  <script src="/static/admin.js"></script>
   <script src="/static/acceptance.js"></script>
   <script>
     /* 页面只画 /api/rag-eval/overview 端出来的那份产物:一个数都不在前端重算。
@@ -942,6 +942,7 @@
       renderLedger();          // 面板已在文档里,这时才填得进去
     }
 
+    mountAdminNav("/rag-eval");
     $("refreshBtn").addEventListener("click", load);
     load();
   </script>

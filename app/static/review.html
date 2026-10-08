@@ -177,7 +177,7 @@
 
   <div id="toast"></div>
 
-  
+  <script src="/static/admin.js"></script>
   <script>
     const listEl = document.getElementById("list");
     const segEl = document.getElementById("statusSeg");
@@ -354,6 +354,7 @@
       } finally { btn.disabled = false; btn.textContent = "确认通过"; }
     });
 
+    mountAdminNav("/review");
     load();
   </script>
 </body>

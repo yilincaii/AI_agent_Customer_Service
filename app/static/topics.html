@@ -132,7 +132,7 @@
     <div class="err" id="err"></div>
   </div>
 
-  
+  <script src="/static/admin.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
 
@@ -184,7 +184,7 @@
     }
 
     $('refreshBtn').onclick = load;
-
+    mountAdminNav('/topics');
     load();
   </script>
 </body>
